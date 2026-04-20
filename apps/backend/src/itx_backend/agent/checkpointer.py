@@ -14,5 +14,11 @@ class InMemoryCheckpointer:
         items = self._store.get(thread_id, [])
         return items[-1] if items else None
 
+    def list_thread_ids(self) -> list[str]:
+        return list(self._store.keys())
+
+    def history(self, thread_id: str) -> list[AgentState]:
+        return list(self._store.get(thread_id, []))
+
 
 checkpointer = InMemoryCheckpointer()

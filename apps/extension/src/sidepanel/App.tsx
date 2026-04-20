@@ -7,6 +7,28 @@ import { EvidencePane } from "./panes/EvidencePane";
 export default function App(): JSX.Element {
   const [messages, setMessages] = useState<string[]>(["IncomeTax Agent ready."]);
   const [page, setPage] = useState("unknown");
+  const [facts] = useState([
+    {
+      factId: "sample-gross-salary",
+      fieldName: "gross_salary",
+      displayLabel: "Gross Salary",
+      value: 0,
+      formattedValue: "₹0.00",
+      category: "income" as const,
+      confidence: 0.95,
+      extractorVersion: "1.0.0",
+      sources: [
+        {
+          documentId: "sample-doc",
+          documentName: "Sample",
+          documentType: "other" as const,
+          snippet: "No evidence yet"
+        }
+      ],
+      validationStatus: "unverified" as const,
+      lastUpdated: new Date().toISOString()
+    }
+  ]);
 
   useEffect(() => {
     const listener = (msg: { type?: string; payload?: any }) => {
@@ -39,7 +61,7 @@ export default function App(): JSX.Element {
       <DetectedDetailsPane page={page} />
       <ChatPane onSend={sendMessage} messages={messages} />
       <PendingActionsPane actions={["No pending write actions"]} />
-      <EvidencePane items={[{ label: "Sample", source: "No evidence yet" }]} />
+      <EvidencePane facts={facts} />
     </main>
   );
 }

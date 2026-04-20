@@ -1,3 +1,31 @@
-from . import actions, auth, documents, tax_facts, threads, websocket
+from . import (
+	actions,
+	analytics,
+	autopilot,
+	auth,
+	ca_workspace,
+	documents,
+	drift,
+	exports,
+	replay,
+	security,
+	tax_facts,
+	threads,
+	websocket,
+)
 
-__all__ = ["actions", "auth", "documents", "tax_facts", "threads", "websocket"]
+__all__ = [
+	"actions",
+	"analytics",
+	"autopilot",
+	"auth",
+	"ca_workspace",
+	"documents",
+	"drift",
+	"exports",
+	"replay",
+	"security",
+	"tax_facts",
+	"threads",
+	"websocket",
+]

@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from itx_backend.agent.checkpointer import checkpointer
 from itx_backend.agent.graph import graph
 from itx_backend.agent.state import AgentState
+from itx_backend.services.analytics import analytics_service
 
 router = APIRouter(prefix="/api/threads", tags=["threads"])
 
@@ -17,7 +18,9 @@ class ThreadStartRequest(BaseModel):
 @router.post("/start")
 def start_thread(payload: ThreadStartRequest) -> AgentState:
     state = AgentState(thread_id=str(uuid.uuid4()), user_id=payload.user_id)
+    analytics_service.track("thread_started", "bootstrap", state.thread_id, {"user_id": payload.user_id})
     final_state = graph.run(state)
+    analytics_service.track("thread_completed", "archive", state.thread_id, {"archived": final_state.archived})
     checkpointer.save(final_state)
     return final_state
 
