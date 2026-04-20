@@ -1,0 +1,8 @@
+{
+  "title": "RegimeChoice",
+  "type": "object",
+  "properties": {
+    "regime": { "type": "string", "enum": ["old", "new"] }
+  },
+  "required": ["regime"]
+}

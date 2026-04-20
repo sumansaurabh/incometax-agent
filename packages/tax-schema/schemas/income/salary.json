@@ -1,0 +1,9 @@
+{
+  "title": "SalaryIncome",
+  "type": "object",
+  "properties": {
+    "grossSalary": { "type": "number" },
+    "tds": { "type": "number" }
+  },
+  "required": ["grossSalary", "tds"]
+}

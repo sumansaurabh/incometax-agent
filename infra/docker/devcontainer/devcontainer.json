@@ -1,0 +1,6 @@
+{
+  "name": "incometax-agent",
+  "dockerComposeFile": "../docker-compose.yml",
+  "service": "backend",
+  "workspaceFolder": "/workspaces/incometax-agent"
+}

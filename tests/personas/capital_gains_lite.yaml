@@ -1,0 +1,4 @@
+persona: capital_gains_lite
+income:
+  salary: 800000
+  capital_gains: 60000

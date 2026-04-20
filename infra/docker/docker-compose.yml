@@ -1,0 +1,12 @@
+version: '3.9'
+services:
+  backend:
+    build:
+      context: ../../
+      dockerfile: infra/docker/backend.Dockerfile
+    ports:
+      - '8000:8000'
+  workers:
+    build:
+      context: ../../
+      dockerfile: infra/docker/workers.Dockerfile

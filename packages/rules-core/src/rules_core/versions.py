@@ -1,0 +1,1 @@
+RULE_VERSION = "ay-2025-26-v1"

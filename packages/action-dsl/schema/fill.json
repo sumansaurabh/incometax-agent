@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "properties": {
+    "type": { "const": "fill" },
+    "selector": { "type": "string" },
+    "value": { "type": "string" }
+  },
+  "required": ["type", "selector", "value"]
+}

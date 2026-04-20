@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Taxpayer",
+  "type": "object",
+  "properties": {
+    "pan": { "type": "string" },
+    "fullName": { "type": "string" },
+    "residentialStatus": { "type": "string", "enum": ["resident", "rnor", "non_resident"] }
+  },
+  "required": ["pan", "fullName", "residentialStatus"]
+}

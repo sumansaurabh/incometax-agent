@@ -1,0 +1,9 @@
+{
+  "title": "DeductionsVIA",
+  "type": "object",
+  "properties": {
+    "section80C": { "type": "number" },
+    "section80D": { "type": "number" }
+  },
+  "required": ["section80C", "section80D"]
+}

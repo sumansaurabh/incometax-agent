@@ -1,0 +1,25 @@
+{
+  "name": "@itx/extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/sidepanel/main.tsx",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "lint": "echo 'lint placeholder for extension'",
+    "test": "echo 'test placeholder for extension'",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "react": "^18.0.0",
+    "react-dom": "^18.0.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.0.0",
+    "typescript": "^5.0.0",
+    "vite": "^4.0.0",
+    "@types/react": "^18.0.0",
+    "@types/react-dom": "^18.0.0"
+  }
+}

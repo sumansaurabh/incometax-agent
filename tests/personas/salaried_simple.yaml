@@ -1,0 +1,6 @@
+persona: salaried_simple
+income:
+  salary: 1200000
+deductions:
+  section80C: 150000
+  section80D: 25000

@@ -1,0 +1,13 @@
+{
+  "name": "@itx/tax-schema",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/ts/index.d.ts",
+  "types": "dist/ts/index.d.ts",
+  "scripts": {
+    "build": "node scripts/build-ts.ts && python scripts/build-py.py",
+    "lint": "echo 'lint placeholder for tax-schema'",
+    "test": "echo 'test placeholder for tax-schema'",
+    "typecheck": "echo 'typecheck placeholder for tax-schema'"
+  }
+}

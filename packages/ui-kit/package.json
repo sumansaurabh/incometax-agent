@@ -1,0 +1,14 @@
+{
+  "name": "@itx/ui-kit",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "index.tsx",
+  "types": "index.tsx",
+  "scripts": {
+    "build": "echo 'ui-kit build complete'",
+    "lint": "echo 'lint placeholder for ui-kit'",
+    "test": "echo 'test placeholder for ui-kit'",
+    "typecheck": "echo 'typecheck placeholder for ui-kit'"
+  }
+}

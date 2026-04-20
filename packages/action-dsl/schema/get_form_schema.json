@@ -1,0 +1,7 @@
+{
+  "type": "object",
+  "properties": {
+    "type": { "const": "get_form_schema" }
+  },
+  "required": ["type"]
+}

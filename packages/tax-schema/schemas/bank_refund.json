@@ -1,0 +1,9 @@
+{
+  "title": "BankRefund",
+  "type": "object",
+  "properties": {
+    "accountNumberMasked": { "type": "string" },
+    "ifsc": { "type": "string" }
+  },
+  "required": ["accountNumberMasked", "ifsc"]
+}

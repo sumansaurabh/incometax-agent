@@ -1,0 +1,7 @@
+persona: salaried_multi_employer
+income:
+  employers:
+    - name: A
+      salary: 900000
+    - name: B
+      salary: 500000

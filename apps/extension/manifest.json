@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "IncomeTax Agent",
+  "version": "0.1.0",
+  "description": "AI copilot for Indian Income Tax e-Filing portal.",
+  "permissions": ["storage", "scripting", "sidePanel"],
+  "host_permissions": ["https://www.incometax.gov.in/*"],
+  "background": {
+    "service_worker": "src/background/service-worker.ts"
+  },
+  "side_panel": {
+    "default_path": "public/sidepanel.html"
+  },
+  "icons": {
+    "16": "public/icons/icon16.png",
+    "48": "public/icons/icon48.png",
+    "128": "public/icons/icon128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.incometax.gov.in/*"],
+      "js": ["src/content/index.ts"]
+    }
+  ]
+}

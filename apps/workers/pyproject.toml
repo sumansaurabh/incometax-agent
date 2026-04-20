@@ -1,0 +1,13 @@
+[tool.poetry]
+name = "itx-workers"
+version = "0.1.0"
+description = "Document intelligence workers for IncomeTax Agent"
+authors = ["Your Name <your@email.com>"]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+pydantic = "^2.0.0"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"

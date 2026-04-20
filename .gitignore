@@ -1,0 +1,11 @@
+node_modules/
+.pnpm-store/
+__pycache__/
+.pytest_cache/
+.venv/
+.env
+.DS_Store
+*.pyc
+dist/
+coverage/
+.mypy_cache/

@@ -1,0 +1,8 @@
+{
+  "title": "ResidentialStatus",
+  "type": "object",
+  "properties": {
+    "status": { "type": "string", "enum": ["resident", "rnor", "non_resident"] }
+  },
+  "required": ["status"]
+}

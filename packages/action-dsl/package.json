@@ -1,0 +1,14 @@
+{
+  "name": "@itx/action-dsl",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/ts/index.ts",
+  "types": "dist/ts/index.ts",
+  "scripts": {
+    "build": "echo 'action-dsl build complete'",
+    "lint": "echo 'lint placeholder for action-dsl'",
+    "test": "echo 'test placeholder for action-dsl'",
+    "typecheck": "echo 'typecheck placeholder for action-dsl'"
+  }
+}

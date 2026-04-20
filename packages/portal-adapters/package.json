@@ -1,0 +1,14 @@
+{
+  "name": "@itx/portal-adapters",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "build": "echo 'portal-adapters build complete'",
+    "lint": "echo 'lint placeholder for portal-adapters'",
+    "test": "echo 'test placeholder for portal-adapters'",
+    "typecheck": "echo 'typecheck placeholder for portal-adapters'"
+  }
+}
