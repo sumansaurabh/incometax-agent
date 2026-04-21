@@ -9,6 +9,6 @@
     "build": "echo 'portal-adapters build complete'",
     "lint": "echo 'lint placeholder for portal-adapters'",
     "test": "echo 'test placeholder for portal-adapters'",
-    "typecheck": "echo 'typecheck placeholder for portal-adapters'"
+    "typecheck": "tsc --noEmit -p tsconfig.json"
   }
 }

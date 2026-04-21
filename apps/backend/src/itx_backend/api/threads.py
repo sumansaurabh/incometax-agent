@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 import uuid
+from typing import Any, Union
 
 from fastapi import APIRouter
 from pydantic import BaseModel
@@ -21,13 +24,23 @@ def start_thread(payload: ThreadStartRequest) -> AgentState:
     analytics_service.track("thread_started", "bootstrap", state.thread_id, {"user_id": payload.user_id})
     final_state = graph.run(state)
     analytics_service.track("thread_completed", "archive", state.thread_id, {"archived": final_state.archived})
-    checkpointer.save(final_state)
     return final_state
 
 
 @router.get("/{thread_id}")
-def get_thread(thread_id: str) -> AgentState | dict[str, str]:
+def get_thread(thread_id: str) -> Union[AgentState, dict[str, str]]:
     state = checkpointer.latest(thread_id)
     if not state:
         return {"error": "thread_not_found"}
     return state
+
+
+@router.get("/{thread_id}/history")
+def get_thread_history(thread_id: str) -> dict[str, Any]:
+    history = checkpointer.history(thread_id)
+    if not history:
+        return {"error": "thread_not_found"}
+    return {
+        "thread_id": thread_id,
+        "checkpoints": [state.model_dump(mode="json") for state in history],
+    }

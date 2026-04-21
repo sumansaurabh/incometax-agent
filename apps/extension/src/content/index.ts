@@ -1,14 +1,14 @@
 import { detectPage } from "./page-detector";
-import { getValidationErrors } from "./actions/validation";
 
-const page = detectPage(document.title);
+const context = detectPage(document);
 
 chrome.runtime.sendMessage({
   type: "page_detected",
   payload: {
-    page,
+    page: context.page,
     title: document.title,
     url: window.location.href,
-    validationErrors: getValidationErrors()
+    fields: context.fields,
+    validationErrors: context.validationErrors
   }
 });

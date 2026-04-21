@@ -8,10 +8,11 @@
     "moduleResolution": "Bundler",
     "resolveJsonModule": true,
     "skipLibCheck": true,
-    "baseUrl": ".",
+    "types": ["chrome", "node"],
     "paths": {
       "@itx/action-dsl": ["../../packages/action-dsl/src"],
-      "@itx/tax-schema": ["../../packages/tax-schema/dist/ts"]
+      "@itx/tax-schema": ["../../packages/tax-schema/dist/ts"],
+      "@itx/portal-adapters": ["../../packages/portal-adapters/src"]
     }
   },
   "include": ["src", "vite.config.ts"]

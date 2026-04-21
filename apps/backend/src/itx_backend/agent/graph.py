@@ -19,31 +19,39 @@ from itx_backend.agent.nodes import (
     submission_summary,
     validate_response,
 )
+from itx_backend.agent.checkpointer import checkpointer
 from itx_backend.agent.state import AgentState
 
 
 class AgentGraph:
+    def __init__(self) -> None:
+        self._nodes = [
+            bootstrap.run,
+            revised_return.run,
+            portal_scan.run,
+            document_intake.run,
+            extract_facts.run,
+            reconcile.run,
+            infer_itr.run,
+            explain_step.run,
+            list_required_info.run,
+            missing_inputs.run,
+            fill_plan.run,
+            approval_gate.run,
+            execute_actions.run,
+            validate_response.run,
+            recovery.run,
+            submission_summary.run,
+            approval_gate.run,
+            everify_handoff.run,
+            ask_user.run,
+            archive.run,
+        ]
+
     def run(self, state: AgentState) -> AgentState:
-        state = bootstrap.run(state)
-        state = revised_return.run(state)
-        state = portal_scan.run(state)
-        state = document_intake.run(state)
-        state = extract_facts.run(state)
-        state = reconcile.run(state)
-        state = infer_itr.run(state)
-        state = explain_step.run(state)
-        state = list_required_info.run(state)
-        state = missing_inputs.run(state)
-        state = fill_plan.run(state)
-        state = approval_gate.run(state)
-        state = execute_actions.run(state)
-        state = validate_response.run(state)
-        state = recovery.run(state)
-        state = submission_summary.run(state)
-        state = approval_gate.run(state)
-        state = everify_handoff.run(state)
-        state = ask_user.run(state)
-        state = archive.run(state)
+        for node in self._nodes:
+            state = node(state)
+            checkpointer.save(state)
         return state
 
 

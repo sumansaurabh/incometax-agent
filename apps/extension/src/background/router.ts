@@ -14,5 +14,12 @@ export function initRouter(): void {
     if (msg?.type === "chat_message") {
       connector.send({ type: "chat_message", payload: msg.payload });
     }
+
+    if (msg?.type === "page_detected") {
+      chrome.runtime.sendMessage({
+        type: "page_context",
+        payload: msg.payload,
+      });
+    }
   });
 }

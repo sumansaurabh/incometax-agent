@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 from fastapi import APIRouter
 from pydantic import BaseModel
+from typing import Optional
 
 from itx_backend.services.replay_harness import replay_harness
 
@@ -47,7 +50,7 @@ def replay(payload: ReplayRequest) -> dict:
 
 
 @router.get("/snapshots")
-def snapshots(thread_id: str | None = None) -> dict:
+def snapshots(thread_id: Optional[str] = None) -> dict:
     return {"items": replay_harness.list_snapshots(thread_id=thread_id)}
 
 

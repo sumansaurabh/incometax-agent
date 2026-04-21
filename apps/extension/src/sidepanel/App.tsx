@@ -4,9 +4,23 @@ import { DetectedDetailsPane } from "./panes/DetectedDetailsPane";
 import { PendingActionsPane } from "./panes/PendingActionsPane";
 import { EvidencePane } from "./panes/EvidencePane";
 
+type DetectedField = {
+  key: string;
+  label: string;
+  required: boolean;
+  selectorHint?: string;
+};
+
+type ValidationError = {
+  field: string;
+  message: string;
+};
+
 export default function App(): JSX.Element {
   const [messages, setMessages] = useState<string[]>(["IncomeTax Agent ready."]);
   const [page, setPage] = useState("unknown");
+  const [detectedFields, setDetectedFields] = useState<DetectedField[]>([]);
+  const [validationErrors, setValidationErrors] = useState<ValidationError[]>([]);
   const [facts] = useState([
     {
       factId: "sample-gross-salary",
@@ -35,8 +49,10 @@ export default function App(): JSX.Element {
       if (msg.type === "backend_message") {
         setMessages((prev) => [...prev, `Agent: ${JSON.stringify(msg.payload)}`]);
       }
-      if (msg.type === "page_detected") {
+      if (msg.type === "page_detected" || msg.type === "page_context") {
         setPage(msg.payload?.page ?? "unknown");
+        setDetectedFields(msg.payload?.fields ?? []);
+        setValidationErrors(msg.payload?.validationErrors ?? []);
       }
     };
 
@@ -58,7 +74,7 @@ export default function App(): JSX.Element {
   return (
     <main>
       <h2>IncomeTax Agent</h2>
-      <DetectedDetailsPane page={page} />
+      <DetectedDetailsPane page={page} fields={detectedFields} validationErrors={validationErrors} />
       <ChatPane onSend={sendMessage} messages={messages} />
       <PendingActionsPane actions={["No pending write actions"]} />
       <EvidencePane facts={facts} />

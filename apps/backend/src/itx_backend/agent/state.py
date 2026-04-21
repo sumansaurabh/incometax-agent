@@ -1,4 +1,6 @@
-from typing import Any
+from __future__ import annotations
+
+from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -18,10 +20,10 @@ class AgentState(BaseModel):
     # Common mutable agent payloads
     portal_state: dict[str, Any] = Field(default_factory=dict)
     tax_facts: dict[str, Any] = Field(default_factory=dict)
-    fill_plan: dict[str, Any] | None = None
+    fill_plan: Optional[dict[str, Any]] = None
     pending_approvals: list[dict[str, Any]] = Field(default_factory=list)
-    submission_summary: dict[str, Any] | None = None
-    pending_submission: dict[str, Any] | None = None
+    submission_summary: Optional[dict[str, Any]] = None
+    pending_submission: Optional[dict[str, Any]] = None
     learned_mappings: dict[str, Any] = Field(default_factory=dict)
     documents: list[dict[str, Any]] = Field(default_factory=list)
     reconciliation: dict[str, Any] = Field(default_factory=dict)

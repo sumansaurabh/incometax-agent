@@ -21,9 +21,23 @@ jobs:
           python-version: '3.11'
       - name: Install JS deps
         run: pnpm install --no-frozen-lockfile
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install fastapi pydantic opentelemetry-sdk opentelemetry-api
       - name: Build
         run: pnpm build
       - name: Lint
-        run: pnpm lint || true
+        run: pnpm lint
+      - name: Typecheck
+        run: pnpm typecheck
       - name: Test
-        run: pnpm test || true
+        run: pnpm test
+      - name: Compile Python
+        run: python -m compileall apps/backend/src apps/workers/src packages/rules-core/src
+      - name: Backend Agent Tests
+        run: PYTHONPATH=apps/backend/src:apps/workers/src:packages/rules-core/src python -m unittest discover -s apps/backend/tests/agent -p 'test_*.py'
+      - name: Backend API Tests
+        run: PYTHONPATH=apps/backend/src:apps/workers/src:packages/rules-core/src python -m unittest discover -s apps/backend/tests/api -p 'test_*.py'
+      - name: Rules Unit Tests
+        run: PYTHONPATH=apps/backend/src:apps/workers/src:packages/rules-core/src python -m unittest discover -s packages/rules-core/tests/cases -p 'test_*.py'

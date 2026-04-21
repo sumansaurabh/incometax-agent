@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 from fastapi import APIRouter
 from pydantic import BaseModel
+from typing import Optional
 
 from itx_backend.telemetry.drift import (
     DriftSeverity,
@@ -16,8 +19,8 @@ class DriftEventRequest(BaseModel):
     page_type: str
     selector: str
     url: str
-    expected: str | None = None
-    actual: str | None = None
+    expected: Optional[str] = None
+    actual: Optional[str] = None
     recovery_attempted: bool = False
     recovery_successful: bool = False
     metadata: dict = {}

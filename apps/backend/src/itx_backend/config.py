@@ -6,6 +6,7 @@ class Settings(BaseModel):
     app_version: str = "0.1.0"
     environment: str = "dev"
     websocket_path: str = "/ws"
+    checkpoint_db_path: str = ".data/checkpoints.sqlite3"
 
 
 settings = Settings()
