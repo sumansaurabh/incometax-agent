@@ -18,6 +18,11 @@ export interface SalaryIncome {
 export interface DeductionsVIA {
   section80C: number;
   section80D: number;
+  section80CCD1B: number;
+  section80DParents: number;
+  section80E: number;
+  section80G: number;
+  section80TTA: number;
 }
 
 export interface OtherSourcesIncome {

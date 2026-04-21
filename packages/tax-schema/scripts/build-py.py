@@ -16,7 +16,12 @@ class SalaryIncome(BaseModel):
 
 class DeductionsVIA(BaseModel):
     section_80c: float
+    section_80ccd_1b: float
     section_80d: float
+    section_80d_parents: float
+    section_80e: float
+    section_80g: float
+    section_80tta: float
 
 
 class OtherSourcesIncome(BaseModel):

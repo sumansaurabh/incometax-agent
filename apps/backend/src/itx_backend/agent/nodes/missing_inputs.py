@@ -149,11 +149,12 @@ QUESTION_TEMPLATES = {
     "health_insurance": MissingInputQuestion(
         question_id="health_insurance",
         priority=QuestionPriority.MEDIUM,
-        question_type=QuestionType.NUMBER,
-        title="How much health insurance premium did you pay?",
-        description="Include premiums for self, spouse, children, and parents.",
-        help_text="Limit: ₹25,000 (self/family) + ₹25,000-50,000 (parents based on age).",
+        question_type=QuestionType.FILE_UPLOAD,
+        title="Please upload your health-insurance premium receipt",
+        description="Health-insurance proofs help claim Section 80D accurately.",
+        help_text="Upload the receipt or policy certificate showing self/family and parent premiums.",
         related_field="deductions.80d",
+        related_documents=["health_insurance"],
     ),
     "capital_gains": MissingInputQuestion(
         question_id="capital_gains",
@@ -228,6 +229,9 @@ def identify_missing_inputs(
     doc_types = {d.get("type") for d in documents}
     if "form16" not in doc_types and tax_facts.get("has_salary_income", True):
         questions.append(QUESTION_TEMPLATES["employer_details"])
+
+    if tax_facts.get("regime") == "old" and "health_insurance" not in doc_types and not tax_facts.get("deductions", {}).get("80d"):
+        questions.append(QUESTION_TEMPLATES["health_insurance"])
     
     # Check capital gains for ITR type determination
     if itr_type == "ITR-1" and "capital_gains" not in tax_facts:
@@ -250,7 +254,7 @@ def identify_missing_inputs(
                 q = QUESTION_TEMPLATES[template_key]
                 # Substitute actual values
                 q.description = q.description.format(
-                    form16_value=mismatch.get("doc_value", "N/A"),
+                    form16_value=mismatch.get("form16_value", mismatch.get("doc_value", "N/A")),
                     ais_value=mismatch.get("ais_value", "N/A")
                 )
                 questions.append(q)

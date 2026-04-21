@@ -20,6 +20,7 @@ async def clients() -> dict:
                 "assessment_year": submission.get("assessment_year"),
                 "can_submit": submission.get("can_submit"),
                 "blocking_issues": submission.get("blocking_issues", []),
+                "mismatch_count": len((latest.reconciliation or {}).get("mismatches", [])),
             }
         )
     return {"items": items}
@@ -33,7 +34,9 @@ async def client_detail(thread_id: str) -> dict:
     return {
         "thread_id": thread_id,
         "tax_facts": state.tax_facts,
+        "reconciliation": state.reconciliation,
         "submission_summary": state.submission_summary or {},
         "pending_approvals": state.pending_approvals,
+        "documents": state.documents,
         "messages": state.messages,
     }

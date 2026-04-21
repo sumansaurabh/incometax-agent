@@ -1,60 +1,60 @@
 from __future__ import annotations
 
+from itx_workers.reconcile.ais_vs_docs import compare as compare_ais_vs_docs
+from itx_workers.reconcile.duplicates import find_duplicate_documents
+from itx_workers.reconcile.helpers import flatten_tax_facts
+
 from itx_backend.agent.state import AgentState
 
 
-def _severity(diff_ratio: float) -> str:
-    if diff_ratio < 0.03:
-        return "harmless"
-    if diff_ratio < 0.08:
-        return "prefill_issue"
-    if diff_ratio < 0.15:
-        return "missing-doc"
-    return "under-reporting"
+AIS_DOC_TYPES = {"ais_json", "ais_csv", "ais_pdf", "tis"}
+AIS_FIELDS = {
+    "salary.gross",
+    "tax_paid.tds_salary",
+    "other_sources.total",
+    "tax_paid.tds_other",
+    "capital_gains.stcg",
+    "capital_gains.ltcg",
+}
+
+
+def _to_reconciliation_items(document: dict, include_fields: set[str]) -> list[dict]:
+    items = []
+    for field, value in flatten_tax_facts("", document.get("normalized_fields", {})):
+        if field not in include_fields:
+            continue
+        if isinstance(value, (int, float)):
+            items.append(
+                {
+                    "field": field,
+                    "amount": float(value),
+                    "document_id": document.get("id"),
+                    "document_type": document.get("type"),
+                }
+            )
+    return items
 
 
 async def run(state: AgentState) -> AgentState:
-    tax_facts = state.get("tax_facts", {})
-    ais = state.get("ais_facts", {})
+    documents = state.get("documents", [])
 
+    ais_documents = [doc for doc in documents if doc.get("type") in AIS_DOC_TYPES]
+    evidence_documents = [doc for doc in documents if doc.get("type") not in AIS_DOC_TYPES]
+
+    ais_items = [item for doc in ais_documents for item in _to_reconciliation_items(doc, AIS_FIELDS)]
+    doc_items = [item for doc in evidence_documents for item in _to_reconciliation_items(doc, AIS_FIELDS)]
+
+    comparison = compare_ais_vs_docs(ais_items, doc_items)
     mismatches = []
-    for key, ais_val in ais.items():
-        local_val = tax_facts.get(key)
-        if local_val is None:
-            mismatches.append(
-                {
-                    "field": key,
-                    "severity": "missing-doc",
-                    "description": "Value exists in AIS but not extracted from docs.",
-                    "ais_value": ais_val,
-                    "our_value": None,
-                }
-            )
-            continue
+    for group in ("duplicate", "missing_doc", "under_reporting", "prefill_issue", "human_decision"):
+        mismatches.extend(comparison.get(group, []))
+    mismatches.extend(find_duplicate_documents(documents))
 
-        if isinstance(ais_val, (int, float)) and isinstance(local_val, (int, float)):
-            denom = max(abs(float(ais_val)), 1.0)
-            ratio = abs(float(ais_val) - float(local_val)) / denom
-            if ratio > 0:
-                mismatches.append(
-                    {
-                        "field": key,
-                        "severity": _severity(ratio),
-                        "description": "Numeric value differs between AIS and extracted facts.",
-                        "ais_value": ais_val,
-                        "our_value": local_val,
-                    }
-                )
-        elif ais_val != local_val:
-            mismatches.append(
-                {
-                    "field": key,
-                    "severity": "human-decision",
-                    "description": "Non-numeric value mismatch requiring user confirmation.",
-                    "ais_value": ais_val,
-                    "our_value": local_val,
-                }
-            )
+    ais_facts = {}
+    for doc in ais_documents:
+        for field, value in flatten_tax_facts("", doc.get("normalized_fields", {})):
+            if field in AIS_FIELDS:
+                ais_facts[field] = value
 
     messages = state.get("messages", [])
     messages.append(
@@ -65,5 +65,14 @@ async def run(state: AgentState) -> AgentState:
         }
     )
 
-    state.apply_update({"messages": messages, "reconciliation": {"mismatches": mismatches}})
+    state.apply_update(
+        {
+            "messages": messages,
+            "ais_facts": ais_facts,
+            "reconciliation": {
+                "mismatches": mismatches,
+                "summary": comparison.get("counts", {}),
+            },
+        }
+    )
     return state

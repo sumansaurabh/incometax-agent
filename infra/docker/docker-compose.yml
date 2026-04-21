@@ -20,6 +20,7 @@ services:
       dockerfile: infra/docker/backend.Dockerfile
     environment:
       ITX_DATABASE_URL: postgresql://itx:itx@postgres:5432/itx
+      ITX_DOCUMENT_STORAGE_ROOT: /tmp/itx-documents
     depends_on:
       postgres:
         condition: service_healthy
@@ -30,3 +31,9 @@ services:
     build:
       context: ../../
       dockerfile: infra/docker/workers.Dockerfile
+    environment:
+      ITX_DATABASE_URL: postgresql://itx:itx@postgres:5432/itx
+      ITX_DOCUMENT_STORAGE_ROOT: /tmp/itx-documents
+    depends_on:
+      postgres:
+        condition: service_healthy

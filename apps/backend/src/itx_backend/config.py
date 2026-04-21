@@ -11,6 +11,10 @@ class Settings(BaseModel):
     database_url: str = os.getenv("ITX_DATABASE_URL", "postgresql://itx:itx@localhost:5432/itx")
     database_min_pool_size: int = int(os.getenv("ITX_DATABASE_MIN_POOL_SIZE", "1"))
     database_max_pool_size: int = int(os.getenv("ITX_DATABASE_MAX_POOL_SIZE", "5"))
+    document_storage_root: str = os.getenv("ITX_DOCUMENT_STORAGE_ROOT", "/tmp/itx-documents")
+    document_upload_secret: str = os.getenv("ITX_DOCUMENT_UPLOAD_SECRET", "dev-document-upload-secret")
+    document_upload_ttl_seconds: int = int(os.getenv("ITX_DOCUMENT_UPLOAD_TTL_SECONDS", "900"))
+    document_queue_batch_size: int = int(os.getenv("ITX_DOCUMENT_QUEUE_BATCH_SIZE", "10"))
 
 
 settings = Settings()

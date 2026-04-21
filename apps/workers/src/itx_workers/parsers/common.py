@@ -26,6 +26,82 @@ def parse_csv_rows(raw_text: str) -> list[dict[str, str]]:
     return [dict(row) for row in reader]
 
 
+def decode_text_bytes(content: bytes) -> str:
+    for encoding in ("utf-8", "utf-8-sig", "latin-1"):
+        try:
+            return content.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return content.decode("utf-8", errors="ignore")
+
+
+def _decode_pdf_literal(value: bytes) -> str:
+    out = bytearray()
+    escaped = False
+    octal_buffer = b""
+    replacements = {
+        ord("n"): b"\n",
+        ord("r"): b"\r",
+        ord("t"): b"\t",
+        ord("b"): b"\b",
+        ord("f"): b"\f",
+        ord("("): b"(",
+        ord(")"): b")",
+        ord("\\"): b"\\",
+    }
+    for byte in value:
+        if octal_buffer:
+            if 48 <= byte <= 55 and len(octal_buffer) < 3:
+                octal_buffer += bytes([byte])
+                continue
+            out.append(int(octal_buffer, 8))
+            octal_buffer = b""
+        if escaped:
+            escaped = False
+            if 48 <= byte <= 55:
+                octal_buffer = bytes([byte])
+                continue
+            out.extend(replacements.get(byte, bytes([byte])))
+            continue
+        if byte == 92:
+            escaped = True
+            continue
+        out.append(byte)
+    if octal_buffer:
+        out.append(int(octal_buffer, 8))
+    return out.decode("latin-1", errors="ignore")
+
+
+def extract_text_from_pdf_bytes(content: bytes) -> str:
+    streams = re.findall(rb"stream\r?\n(.*?)\r?\nendstream", content, re.DOTALL)
+    if not streams:
+        streams = [content]
+
+    chunks: list[str] = []
+    for stream in streams:
+        for literal in re.findall(rb"\((.*?)\)\s*Tj", stream, re.DOTALL):
+            text = _decode_pdf_literal(literal).strip()
+            if text:
+                chunks.append(text)
+        for array_literal in re.findall(rb"\[(.*?)\]\s*TJ", stream, re.DOTALL):
+            nested = re.findall(rb"\((.*?)\)", array_literal, re.DOTALL)
+            text = "".join(_decode_pdf_literal(item) for item in nested).strip()
+            if text:
+                chunks.append(text)
+
+    if chunks:
+        return normalize_text("\n".join(chunks))
+
+    decoded = decode_text_bytes(content)
+    return normalize_text("\n".join(re.findall(r"[A-Za-z0-9][A-Za-z0-9 ,.:;@#/()_\-]{4,}", decoded)))
+
+
+def fallback_ocr_text(content: bytes) -> str:
+    decoded = decode_text_bytes(content)
+    chunks = re.findall(r"[A-Za-z0-9][A-Za-z0-9 ,.:;@#/()_\-]{3,}", decoded)
+    return normalize_text("\n".join(chunks))
+
+
 def parse_indian_amount(value: Any) -> Optional[float]:
     if value is None:
         return None

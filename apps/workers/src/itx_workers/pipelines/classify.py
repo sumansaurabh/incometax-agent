@@ -38,6 +38,8 @@ def _detect_from_payload(payload: dict) -> tuple[str, float]:
         return "ais_pdf", 0.88
     if "salary slip" in text or "payslip" in text:
         return "salary_slip", 0.86
+    if "health insurance" in text or "mediclaim" in text or "policy premium" in text:
+        return "health_insurance", 0.86
     if "interest certificate" in text:
         return "interest_certificate", 0.86
     if "capital gain" in text or "contract note" in text or "broker" in text:

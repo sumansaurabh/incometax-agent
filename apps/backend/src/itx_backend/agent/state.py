@@ -29,6 +29,7 @@ class AgentState(BaseModel):
     rejected_documents: list[dict[str, Any]] = Field(default_factory=list)
     reconciliation: dict[str, Any] = Field(default_factory=dict)
     fact_evidence: dict[str, Any] = Field(default_factory=dict)
+    ais_facts: dict[str, Any] = Field(default_factory=dict)
     answered_questions: set[str] = Field(default_factory=set)
 
     def get(self, key: str, default: Any = None) -> Any:

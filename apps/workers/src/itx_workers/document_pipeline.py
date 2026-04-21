@@ -18,6 +18,13 @@ async def process_document(payload: dict[str, Any]) -> dict[str, Any]:
     current["parsed"] = parsed
     current = entities.run(current)
     current = normalize.run(current)
+    current["processing_summary"] = {
+        "document_type": current.get("document_type"),
+        "classification_confidence": current.get("classification_confidence"),
+        "text_extraction_confidence": current.get("text_extraction_confidence"),
+        "ocr_used": current.get("ocr_used", False),
+        "ocr_confidence": current.get("ocr_confidence"),
+    }
     return current
 
 

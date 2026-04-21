@@ -6,6 +6,30 @@ import unittest
 from itx_workers.document_pipeline import process_document
 
 
+def _make_pdf(text: str) -> bytes:
+    payload = f"BT /F1 12 Tf 50 750 Td ({text}) Tj ET"
+    objects = [
+        b"1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n",
+        b"2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n",
+        b"3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >> endobj\n",
+        f"4 0 obj << /Length {len(payload)} >> stream\n{payload}\nendstream endobj\n".encode(),
+        b"5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj\n",
+    ]
+    header = b"%PDF-1.4\n"
+    body = b"".join(objects)
+    xref_start = len(header) + len(body)
+    offsets = []
+    cursor = len(header)
+    for obj in objects:
+        offsets.append(cursor)
+        cursor += len(obj)
+    xref = [f"xref\n0 {len(offsets) + 1}\n0000000000 65535 f \n".encode()]
+    for offset in offsets:
+        xref.append(f"{offset:010d} 00000 n \n".encode())
+    trailer = f"trailer << /Size {len(offsets) + 1} /Root 1 0 R >>\nstartxref\n{xref_start}\n%%EOF\n".encode()
+    return header + body + b"".join(xref) + trailer
+
+
 class DocumentPipelineTest(unittest.IsolatedAsyncioTestCase):
     async def test_form16_pipeline_normalizes_salary_and_tds(self) -> None:
         payload = {
@@ -60,3 +84,41 @@ class DocumentPipelineTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["normalized_fields"]["capital_gains"]["ltcg"], 55000.0)
         self.assertEqual(result["normalized_fields"]["deductions"]["80c"], 150000.0)
         self.assertEqual(result["normalized_fields"]["bank"]["ifsc"], "HDFC0001234")
+
+    async def test_pdf_bytes_extract_form16_text_without_raw_text(self) -> None:
+        payload = {
+            "file_name": "form16.pdf",
+            "mime_type": "application/pdf",
+            "doc_type": "form16",
+            "content_bytes": _make_pdf(
+                "Form 16 PAN ABCDE1234F Employer TAN BLRA12345B Gross Salary 1250000 Tax deducted at source 125000"
+            ),
+        }
+
+        result = await process_document(payload)
+
+        self.assertEqual(result["document_type"], "form16")
+        self.assertTrue(result["text"])
+        self.assertGreater(result["text_extraction_confidence"], 0)
+        self.assertFalse(result.get("ocr_used", False))
+        self.assertEqual(result["normalized_fields"]["pan"], "ABCDE1234F")
+        self.assertEqual(result["normalized_fields"]["salary"]["gross"], 1250000.0)
+
+    async def test_health_insurance_pipeline_extracts_80d(self) -> None:
+        payload = {
+            "file_name": "health-insurance.txt",
+            "mime_type": "text/plain",
+            "doc_type": "health_insurance",
+            "raw_text": (
+                "Health Insurance Premium Certificate\n"
+                "Policy Holder: Alice Example\n"
+                "Self and Family Premium: 18000\n"
+                "Parents Premium: 32000\n"
+            ),
+        }
+
+        result = await process_document(payload)
+
+        self.assertEqual(result["document_type"], "health_insurance")
+        self.assertEqual(result["normalized_fields"]["deductions"]["80d"], 50000.0)
+        self.assertEqual(result["normalized_fields"]["deductions"]["80d_parents"], 32000.0)
