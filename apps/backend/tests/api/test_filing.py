@@ -15,6 +15,8 @@ from itx_backend.api.filing import (
     EVerifyPrepareRequest,
     EVerifyStartRequest,
     FilingSummaryRequest,
+    ItrUConfirmRequest,
+    ItrUPrepareRequest,
     OfficialArtifactAttachmentRequest,
     RefundStatusCaptureRequest,
     RevisionCreateRequest,
@@ -22,6 +24,9 @@ from itx_backend.api.filing import (
     NoticePreparationRequest,
     YearOverYearRequest,
     attach_official_artifact,
+    confirm_itr_u,
+    get_itr_u_state,
+    prepare_itr_u,
     SubmitPrepareRequest,
     capture_refund_status,
     complete_everify,
@@ -68,14 +73,14 @@ class FilingApiTest(unittest.IsolatedAsyncioTestCase):
         pool = await get_pool()
         async with pool.acquire() as connection:
             await connection.execute(
-                "truncate table refund_status_snapshots, notice_response_preparations, next_ay_checklists, year_over_year_comparisons, revision_threads, filed_return_artifacts, everification_status, submission_summaries, draft_returns, consents, approvals, action_proposals, action_executions, field_fill_history, validation_errors, filing_audit_trail, agent_checkpoints cascade"
+                "truncate table itr_u_threads, refund_status_snapshots, notice_response_preparations, next_ay_checklists, year_over_year_comparisons, revision_threads, filed_return_artifacts, everification_status, submission_summaries, draft_returns, consents, approvals, action_proposals, action_executions, field_fill_history, validation_errors, filing_audit_trail, agent_checkpoints cascade"
             )
 
     async def asyncTearDown(self) -> None:
         pool = await get_pool()
         async with pool.acquire() as connection:
             await connection.execute(
-                "truncate table purge_jobs, refund_status_snapshots, notice_response_preparations, next_ay_checklists, year_over_year_comparisons, revision_threads, filed_return_artifacts, everification_status, submission_summaries, draft_returns, consents, approvals, action_proposals, action_executions, field_fill_history, validation_errors, filing_audit_trail, agent_checkpoints cascade"
+                "truncate table purge_jobs, itr_u_threads, refund_status_snapshots, notice_response_preparations, next_ay_checklists, year_over_year_comparisons, revision_threads, filed_return_artifacts, everification_status, submission_summaries, draft_returns, consents, approvals, action_proposals, action_executions, field_fill_history, validation_errors, filing_audit_trail, agent_checkpoints cascade"
             )
         if self._auth_token is not None:
             reset_request_auth(self._auth_token)
@@ -363,3 +368,127 @@ class FilingApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(checklist_count, 1)
         self.assertEqual(notice_count, 1)
         self.assertEqual(refund_count, 1)
+
+    async def test_itr_u_prepare_and_confirm_flow(self) -> None:
+        """ITR-U prepare returns eligibility + escalation gate; confirm creates the new thread."""
+        self._bind_auth("user-5")
+        # Seed a filed return on thread-filing-5.
+        await checkpointer.save(
+            AgentState(
+                thread_id="thread-filing-5",
+                user_id="user-5",
+                itr_type="ITR-1",
+                tax_facts={
+                    "assessment_year": "2025-26",
+                    "name": "Dave Example",
+                    "pan": "ABCDE1234J",
+                    "regime": "new",
+                    "salary": {"gross": 1800000},
+                    "tax_paid": {"tds_salary": 220000},
+                    "bank": {"account_number": "9876543210", "ifsc": "ICIC0001234"},
+                },
+                submission_summary={
+                    "assessment_year": "2025-26",
+                    "itr_type": "ITR-1",
+                    "regime": "new",
+                    "gross_total_income": 1800000,
+                    "total_deductions": 0,
+                    "taxable_income": 1800000,
+                    "net_tax_liability": 310000,
+                    "total_tax_paid": 220000,
+                    "tax_payable": 90000,
+                    "refund_due": 0,
+                    "mismatch_count": 0,
+                    "can_submit": True,
+                    "blocking_issues": [],
+                },
+                filing_artifacts={"ack_no": "ACK-ITR-U-BASE"},
+                submission_status="submitted",
+                reconciliation={"mismatches": []},
+            )
+        )
+
+        # 1. /prepare — should be eligible, no blockers.
+        escalation = await prepare_itr_u(
+            ItrUPrepareRequest(
+                thread_id="thread-filing-5",
+                reason_code="income_not_disclosed",
+                reason_detail="Freelance income from Q4 was omitted.",
+            )
+        )
+        self.assertTrue(escalation["eligibility"]["eligible"])
+        self.assertEqual(escalation["eligibility"]["blockers"], [])
+        self.assertEqual(escalation["reason_code"], "income_not_disclosed")
+        self.assertIn("escalation_md", escalation)
+        self.assertIn("Chartered Accountant", escalation["escalation_md"])
+
+        # 2. /confirm — creates ITR-U thread seed and confirms escalation.
+        confirmed = await confirm_itr_u(
+            ItrUConfirmRequest(
+                thread_id="thread-filing-5",
+                reason_code="income_not_disclosed",
+                reason_detail="Freelance income from Q4 was omitted.",
+                confirmed_by="ca-reviewer-1",
+            )
+        )
+        self.assertEqual(confirmed["base_thread_id"], "thread-filing-5")
+        itr_u_thread_id = confirmed["itr_u_thread_id"]
+        self.assertTrue(itr_u_thread_id.startswith("thread-filing-5"))
+        self.assertEqual(confirmed["itr_u_record"]["status"], "escalation_confirmed")
+        self.assertEqual(confirmed["itr_u_record"]["reason_code"], "income_not_disclosed")
+        self.assertEqual(confirmed["itr_u_record"]["base_ack_no"], "ACK-ITR-U-BASE")
+        self.assertEqual(confirmed["itr_u_record"]["escalation_confirmed_by"], "ca-reviewer-1")
+        self.assertIsNotNone(confirmed["itr_u_record"]["escalation_confirmed_at"])
+
+        # Seed tax_facts on the new thread should carry ITR-U context.
+        self.assertEqual(confirmed["seed_tax_facts"]["itr_u"]["base_thread_id"], "thread-filing-5")
+        self.assertEqual(confirmed["seed_tax_facts"]["itr_u"]["reason_code"], "income_not_disclosed")
+
+        # 3. New thread checkpoint must have been saved.
+        itr_u_state = await checkpointer.latest(itr_u_thread_id)
+        self.assertIsNotNone(itr_u_state)
+        assert itr_u_state is not None
+        self.assertTrue(itr_u_state.revision_context.get("is_itr_u"))
+        self.assertEqual(itr_u_state.revision_context["base_thread_id"], "thread-filing-5")
+
+        # 4. GET /itr-u/{thread_id} surfaces the record.
+        record = await get_itr_u_state("thread-filing-5")
+        self.assertEqual(record["status"], "escalation_confirmed")
+        self.assertEqual(record["itr_u_thread_id"], itr_u_thread_id)
+
+        # 5. filing_state/{thread_id} includes itr_u.
+        filing = await filing_state("thread-filing-5")
+        self.assertIsNotNone(filing["itr_u"])
+        self.assertEqual(filing["itr_u"]["status"], "escalation_confirmed")
+
+        # 6. DB record count sanity.
+        pool = await get_pool()
+        async with pool.acquire() as connection:
+            count = await connection.fetchval(
+                "select count(*) from itr_u_threads where base_thread_id = $1",
+                "thread-filing-5",
+            )
+        self.assertEqual(count, 1)
+
+    async def test_itr_u_prepare_rejects_unfiled_thread(self) -> None:
+        """ITR-U /prepare returns 409 when the original return has not been filed."""
+        self._bind_auth("user-6")
+        await checkpointer.save(
+            AgentState(
+                thread_id="thread-filing-6",
+                user_id="user-6",
+                itr_type="ITR-1",
+                tax_facts={"assessment_year": "2025-26"},
+                submission_status="draft",
+            )
+        )
+        from fastapi import HTTPException as FastAPIHTTPException
+        with self.assertRaises(FastAPIHTTPException) as ctx:
+            await prepare_itr_u(
+                ItrUPrepareRequest(
+                    thread_id="thread-filing-6",
+                    reason_code="income_not_disclosed",
+                )
+            )
+        self.assertEqual(ctx.exception.status_code, 409)
+        self.assertEqual(ctx.exception.detail["code"], "itr_u_not_eligible")

@@ -277,6 +277,7 @@ export type FilingStateResponse = {
   next_ay_checklist: NextAyChecklistRecord | null;
   notices: NoticePreparationRecord[];
   refund_status: RefundStatusRecord | null;
+  itr_u: ItrURecord | null;
   archived: boolean;
 };
 
@@ -943,6 +944,90 @@ export async function resumeThreadQuarantine(input: {
     method: "POST",
     body: JSON.stringify({ note: input.note ?? "user_reviewed_anomaly" }),
   });
+}
+
+// ---------------------------------------------------------------------------
+// ITR-U (Updated Return) types and API functions
+// ---------------------------------------------------------------------------
+
+export type ItrUEligibility = {
+  eligible: boolean;
+  assessment_year?: string | null;
+  ay_end_date?: string | null;
+  deadline_date?: string | null;
+  as_of_date: string;
+  submission_status: string;
+  blockers: string[];
+  warnings: string[];
+  original_ack_no?: string | null;
+};
+
+export type ItrUEscalation = {
+  thread_id: string;
+  reason_code: string;
+  reason_label: string;
+  reason_detail: string;
+  eligibility: ItrUEligibility;
+  escalation_required: boolean;
+  escalation_md: string;
+  valid_reason_codes: Record<string, string>;
+};
+
+export type ItrURecord = {
+  id: string;
+  base_thread_id: string;
+  itr_u_thread_id?: string | null;
+  status: string;
+  reason_code: string;
+  reason_detail: string;
+  base_ack_no?: string | null;
+  eligibility: ItrUEligibility;
+  escalation_confirmed_at?: string | null;
+  escalation_confirmed_by?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export async function prepareItrU(input: {
+  threadId: string;
+  reasonCode: string;
+  reasonDetail?: string;
+}): Promise<ItrUEscalation> {
+  return request<ItrUEscalation>("/api/filing/itr-u/prepare", {
+    method: "POST",
+    body: JSON.stringify({
+      thread_id: input.threadId,
+      reason_code: input.reasonCode,
+      reason_detail: input.reasonDetail ?? "",
+    }),
+  });
+}
+
+export async function confirmItrU(input: {
+  threadId: string;
+  reasonCode: string;
+  reasonDetail?: string;
+  confirmedBy?: string;
+}): Promise<{
+  base_thread_id: string;
+  itr_u_thread_id: string;
+  itr_u_record: ItrURecord;
+  escalation_md: string;
+  seed_tax_facts: Record<string, unknown>;
+}> {
+  return request("/api/filing/itr-u/confirm", {
+    method: "POST",
+    body: JSON.stringify({
+      thread_id: input.threadId,
+      reason_code: input.reasonCode,
+      reason_detail: input.reasonDetail ?? "",
+      confirmed_by: input.confirmedBy ?? null,
+    }),
+  });
+}
+
+export async function fetchItrUState(threadId: string): Promise<ItrURecord> {
+  return request<ItrURecord>(`/api/filing/itr-u/${threadId}`);
 }
 
 export function filingArtifactUrl(

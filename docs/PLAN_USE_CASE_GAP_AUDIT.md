@@ -38,7 +38,7 @@ Validation performed after these implementations:
 - `PYTHONPATH=apps/backend/src:apps/workers/src:packages/rules-core/src python -m compileall apps/backend/src apps/workers/src packages/rules-core/src` passed after the post-filing implementation and Python 3.9 annotation cleanup.
 - `ITX_DATABASE_URL=postgresql://itx:itx@localhost:5432/itx PYTHONPATH=apps/backend/src:apps/workers/src:packages/rules-core/src python -m pytest apps/backend/tests/api/test_filing.py apps/backend/tests/api/test_reviewer_workflow.py -q` passed after adding CA export bundles.
 
-What is still materially pending now is concentrated in the remaining Phase 0 and Phase 1 hardening gaps, the Phase 4 updated-return and dashboard-depth gaps, and the Phase 5 breadth and operability backlog. `docs/IMPLEMENTATION_30_POINT_PLAN.md` now holds the canonical 30-point finish plan for that remaining work.
+What is still materially pending now is concentrated in the remaining Phase 0 and Phase 1 hardening gaps, the Phase 4 CA dashboard-depth gaps, and the Phase 5 breadth and operability backlog. `docs/IMPLEMENTATION_30_POINT_PLAN.md` now holds the canonical 30-point finish plan for that remaining work.
 
 ## What Was Reviewed
 
@@ -96,7 +96,7 @@ The weakest areas are now:
 
 - page adapters and DOM-derived schemas across more portal branches;
 - broader parser coverage, OCR quality, and extraction accuracy validation;
-- broader rules coverage for complex taxpayers and updated-return coverage;
+- broader rules coverage for complex taxpayers;
 - deeper CA dashboard tooling, richer analytics, replay depth, and inline field evidence;
 - automated tests and CI enforcement.
 
@@ -104,7 +104,7 @@ Bottom line:
 
 - Phase 2-4 core assisted filing is implemented in code with durable persistence.
 - Several Phase 5 trust/safety items are now also implemented in code.
-- The repository still falls short of full roadmap completion because broader taxpayer coverage, updated-return coverage, CA dashboard depth, and CI depth remain open.
+- The repository still falls short of full roadmap completion because broader taxpayer coverage, CA dashboard depth, and CI depth remain open.
 
 ## Phase-Level Verdict
 
@@ -159,9 +159,9 @@ Strict scoring rule used here:
 
 Summary:
 
-- Implemented-in-code: 25
+- Implemented-in-code: 26
 - Partial: 42
-- Missing: 3
+- Missing: 2
 
 ### A. Onboarding And Session
 
@@ -234,7 +234,7 @@ Summary:
 49. Implemented-in-code - E-verification handoff: method-specific handoff, manual completion tracking, and sidepanel flow are implemented.
 50. Implemented-in-code - ITR-V + JSON archive: summary, offline JSON, and evidence bundle are archived, and the placeholder ITR-V can now be replaced with an attached official portal acknowledgement artifact.
 51. Implemented-in-code - Revised return: thread branching, lineage persistence, and sidepanel-triggered revision flow are implemented.
-52. Missing - Updated return (ITR-U) support: not implemented.
+52. Implemented-in-code - Updated return (ITR-U) support: eligibility check (Section 139(8A)), reason-code validation, escalation gate requiring CA confirmation, new ITR-U thread seed with pre-loaded tax facts, DB persistence with audit trail, and extension `prepareItrU`/`confirmItrU` API functions are implemented. Two integration tests pass.
 
 ### H. Post-Filing And Multi-Year
 
@@ -305,8 +305,8 @@ This section consolidates what is still genuinely pending after the recent Phase
 ### 6. Filing And Post-Filing Completion
 
 - Broaden the new official-artifact attachment path with stronger page-specific capture and portal-download automation when available.
-- Add ITR-U support.
 - Broaden the new post-filing baseline with uploaded-notice parsing, refund-status history, and response-packet export.
+- Broaden the ITR-U baseline with stronger reason-code UX, portal-download automation, and uploaded-amendment-document support.
 
 ### 7. CA / Reviewer Workspace
 

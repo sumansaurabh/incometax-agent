@@ -920,6 +920,175 @@ class FilingRuntimeService:
             "observed_at": row["observed_at"].isoformat() if row["observed_at"] else None,
         }
 
+    # ------------------------------------------------------------------
+    # ITR-U (Updated Return) persistence
+    # ------------------------------------------------------------------
+
+    async def record_itr_u_thread(
+        self,
+        *,
+        base_thread_id: str,
+        reason_code: str,
+        reason_detail: str,
+        base_ack_no: Optional[str],
+        eligibility: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Insert a new itr_u_threads row in status 'awaiting_escalation'."""
+        record_id = uuid.uuid4()
+        pool = await get_pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                await connection.execute(
+                    """
+                    insert into itr_u_threads (
+                        id, base_thread_id, status, reason_code, reason_detail,
+                        base_ack_no, eligibility_json
+                    )
+                    values ($1, $2, 'awaiting_escalation', $3, $4, $5, $6::jsonb)
+                    """,
+                    record_id,
+                    base_thread_id,
+                    reason_code,
+                    reason_detail,
+                    base_ack_no,
+                    json.dumps(eligibility, sort_keys=True),
+                )
+                await connection.execute(
+                    """
+                    insert into filing_audit_trail (id, ay_id, event, payload, rule_version, adapter_version)
+                    values ($1, $2, 'itr_u_prepared', $3::jsonb, $4, $5)
+                    """,
+                    uuid.uuid4(),
+                    str(eligibility.get("assessment_year") or "unknown"),
+                    json.dumps(
+                        {
+                            "base_thread_id": base_thread_id,
+                            "reason_code": reason_code,
+                            "base_ack_no": base_ack_no,
+                        },
+                        sort_keys=True,
+                    ),
+                    "phase4-itr-u-1",
+                    "itr_u",
+                )
+        row = await self._fetch_itr_u_by_id(record_id)
+        if not row:
+            raise KeyError(base_thread_id)
+        return self._serialize_itr_u(row)
+
+    async def confirm_itr_u_escalation(
+        self,
+        *,
+        base_thread_id: str,
+        itr_u_thread_id: str,
+        confirmed_by: str,
+    ) -> dict[str, Any]:
+        """Mark the ITR-U escalation confirmed and record the new thread ID."""
+        now = datetime.utcnow()
+        pool = await get_pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                row = await connection.fetchrow(
+                    """
+                    update itr_u_threads
+                    set status = 'escalation_confirmed',
+                        itr_u_thread_id = $2,
+                        escalation_confirmed_at = $3,
+                        escalation_confirmed_by = $4,
+                        updated_at = $3
+                    where base_thread_id = $1
+                      and status = 'awaiting_escalation'
+                    returning id
+                    """,
+                    base_thread_id,
+                    now,
+                    confirmed_by,
+                )
+                if not row:
+                    raise KeyError(base_thread_id)
+                assessment_year = await connection.fetchval(
+                    "select eligibility_json->>'assessment_year' from itr_u_threads where id = $1",
+                    row["id"],
+                )
+                await connection.execute(
+                    """
+                    insert into filing_audit_trail (id, ay_id, event, payload, rule_version, adapter_version)
+                    values ($1, $2, 'itr_u_escalation_confirmed', $3::jsonb, $4, $5)
+                    """,
+                    uuid.uuid4(),
+                    str(assessment_year or "unknown"),
+                    json.dumps(
+                        {
+                            "base_thread_id": base_thread_id,
+                            "itr_u_thread_id": itr_u_thread_id,
+                            "confirmed_by": confirmed_by,
+                            "confirmed_at": now.isoformat(),
+                        },
+                        sort_keys=True,
+                    ),
+                    "phase4-itr-u-1",
+                    "itr_u",
+                )
+        latest = await self.latest_itr_u(base_thread_id)
+        if not latest:
+            raise KeyError(base_thread_id)
+        return latest
+
+    async def latest_itr_u(self, base_thread_id: str) -> Optional[dict[str, Any]]:
+        pool = await get_pool()
+        async with pool.acquire() as connection:
+            row = await connection.fetchrow(
+                """
+                select id, base_thread_id, itr_u_thread_id, status,
+                       reason_code, reason_detail, base_ack_no,
+                       eligibility_json::text as eligibility_json,
+                       escalation_confirmed_at, escalation_confirmed_by,
+                       created_at, updated_at
+                from itr_u_threads
+                where base_thread_id = $1
+                order by created_at desc
+                limit 1
+                """,
+                base_thread_id,
+            )
+        return self._serialize_itr_u(row) if row else None
+
+    async def _fetch_itr_u_by_id(self, record_id: uuid.UUID) -> Optional[Record]:
+        pool = await get_pool()
+        async with pool.acquire() as connection:
+            return await connection.fetchrow(
+                """
+                select id, base_thread_id, itr_u_thread_id, status,
+                       reason_code, reason_detail, base_ack_no,
+                       eligibility_json::text as eligibility_json,
+                       escalation_confirmed_at, escalation_confirmed_by,
+                       created_at, updated_at
+                from itr_u_threads
+                where id = $1
+                """,
+                record_id,
+            )
+
+    def _serialize_itr_u(self, row: Record) -> dict[str, Any]:
+        return {
+            "id": str(row["id"]),
+            "base_thread_id": row["base_thread_id"],
+            "itr_u_thread_id": row["itr_u_thread_id"],
+            "status": row["status"],
+            "reason_code": row["reason_code"],
+            "reason_detail": row["reason_detail"],
+            "base_ack_no": row["base_ack_no"],
+            "eligibility": json.loads(row["eligibility_json"] or "{}"),
+            "escalation_confirmed_at": (
+                row["escalation_confirmed_at"].isoformat()
+                if row["escalation_confirmed_at"]
+                else None
+            ),
+            "escalation_confirmed_by": row["escalation_confirmed_by"],
+            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+            "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+        }
+
     def _render_itrv_placeholder(
         self,
         *,

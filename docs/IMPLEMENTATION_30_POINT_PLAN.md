@@ -52,7 +52,7 @@ This document replaces the earlier scaffold-executed checklist. The repository n
 ### Filing, Reviewer, And Post-Filing Completion
 
 21. Broaden the new official-artifact attachment baseline with page-specific capture, stronger parsing, and portal-download automation when the portal exposes it.
-22. Implement ITR-U or updated-return workflow with explicit escalation gates and audit coverage.
+22. Broaden the new ITR-U baseline with richer reason-code UX, uploaded-amendment-document support, portal-download automation for the updated return acknowledgement, and additional test persona coverage.
 23. Build a real CA or reviewer dashboard on top of the current shared-thread APIs, including reviewer queues and sign-off management.
 24. Broaden the new CA export baseline into a real multi-client operations layer with queue filters, case packaging presets, and dashboard UX.
 25. Broaden post-filing workflows with uploaded-notice parsing, refund-status history, and response-packet export on top of the implemented baseline.

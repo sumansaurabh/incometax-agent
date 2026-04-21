@@ -12,6 +12,12 @@ from itx_backend.agent.state import AgentState
 from itx_backend.security.quarantine import ensure_thread_not_quarantined
 from itx_backend.security.request_auth import get_request_auth, require_thread_state
 from itx_backend.services.filing_runtime import filing_runtime
+from itx_backend.services.itr_u_service import (
+    VALID_REASON_CODES,
+    build_itr_u_seed_facts,
+    check_itr_u_eligibility,
+    prepare_itr_u_escalation,
+)
 from itx_backend.services.official_artifacts import prepare_official_artifact_attachment
 from itx_backend.services.post_filing import (
     assessment_year_for_state,
@@ -119,6 +125,19 @@ class RefundStatusCaptureRequest(BaseModel):
     manual_processed_at: Optional[str] = None
     manual_refund_mode: Optional[str] = None
     manual_bank_masked: Optional[str] = None
+
+
+class ItrUPrepareRequest(BaseModel):
+    thread_id: str
+    reason_code: str
+    reason_detail: str = ""
+
+
+class ItrUConfirmRequest(BaseModel):
+    thread_id: str
+    reason_code: str
+    reason_detail: str = ""
+    confirmed_by: Optional[str] = None
 
 
 def _require_state(state: Optional[AgentState]) -> AgentState:
@@ -553,6 +572,7 @@ async def filing_state(thread_id: str) -> dict[str, Any]:
         "next_ay_checklist": await filing_runtime.latest_next_ay_checklist(thread_id),
         "notices": await filing_runtime.list_notice_preparations(thread_id),
         "refund_status": await filing_runtime.latest_refund_status(thread_id),
+        "itr_u": await filing_runtime.latest_itr_u(thread_id),
         "archived": state.archived,
     }
 
@@ -581,3 +601,137 @@ async def download_artifact(thread_id: str, artifact_name: str) -> Response:
         media_type=media_type,
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+# ---------------------------------------------------------------------------
+# ITR-U (Updated Return) endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.post("/itr-u/prepare")
+async def prepare_itr_u(payload: ItrUPrepareRequest) -> dict[str, Any]:
+    """
+    Check eligibility and return the escalation gate for an ITR-U filing.
+    Does *not* create any database records — it only analyses the current thread
+    and returns what the user and their CA need to review before confirming.
+    """
+    state = await require_thread_state(payload.thread_id)
+    try:
+        escalation = prepare_itr_u_escalation(state, payload.reason_code, payload.reason_detail)
+    except ValueError as exc:
+        if str(exc).startswith("invalid_reason_code"):
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "invalid_reason_code",
+                    "valid_codes": list(VALID_REASON_CODES.keys()),
+                },
+            ) from exc
+        raise
+    if not escalation["eligibility"]["eligible"]:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "itr_u_not_eligible",
+                "blockers": escalation["eligibility"]["blockers"],
+            },
+        )
+    return escalation
+
+
+@router.post("/itr-u/confirm")
+async def confirm_itr_u(payload: ItrUConfirmRequest) -> dict[str, Any]:
+    """
+    Record the escalation confirmation and create the ITR-U thread seed.
+
+    The caller (CA or authorised reviewer) confirms that the taxpayer has been
+    briefed and agrees to proceed.  A new checkpoint is saved with ITR-U context
+    pre-loaded, and the ``itr_u_threads`` row is created in
+    ``escalation_confirmed`` status.
+    """
+    state = await require_thread_state(payload.thread_id)
+    auth = get_request_auth(required=False)
+
+    # Re-run eligibility to catch races / state changes since /prepare.
+    try:
+        escalation = prepare_itr_u_escalation(state, payload.reason_code, payload.reason_detail)
+    except ValueError as exc:
+        if str(exc).startswith("invalid_reason_code"):
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "invalid_reason_code",
+                    "valid_codes": list(VALID_REASON_CODES.keys()),
+                },
+            ) from exc
+        raise
+    if not escalation["eligibility"]["eligible"]:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "itr_u_not_eligible",
+                "blockers": escalation["eligibility"]["blockers"],
+            },
+        )
+
+    # Build seed facts for the new ITR-U thread.
+    seed_facts = build_itr_u_seed_facts(state, payload.reason_code, payload.reason_detail)
+    itr_u_thread_id = f"{payload.thread_id}-itr-u-1"
+
+    # Save a new checkpoint under the ITR-U thread ID.
+    itr_u_state = AgentState(
+        thread_id=itr_u_thread_id,
+        user_id=state.user_id,
+        itr_type=state.itr_type,
+        current_node="bootstrap",
+        current_page=state.current_page,
+        portal_page=state.portal_page,
+        tax_facts=seed_facts,
+        fact_evidence=state.fact_evidence,
+        reconciliation=state.reconciliation,
+        documents=list(state.documents),
+        messages=[],
+        revision_context={
+            "is_itr_u": True,
+            "base_thread_id": payload.thread_id,
+            "reason_code": payload.reason_code,
+            "reason_detail": payload.reason_detail,
+        },
+    )
+    await checkpointer.save(itr_u_state)
+
+    # Persist the ITR-U record.
+    base_ack_no = (state.filing_artifacts or {}).get("ack_no")
+    itr_u_record = await filing_runtime.record_itr_u_thread(
+        base_thread_id=payload.thread_id,
+        reason_code=payload.reason_code,
+        reason_detail=payload.reason_detail,
+        base_ack_no=base_ack_no,
+        eligibility=escalation["eligibility"],
+    )
+
+    # Immediately confirm the escalation.
+    confirmed_by = payload.confirmed_by or (auth.user_id if auth else "self")
+    itr_u_record = await filing_runtime.confirm_itr_u_escalation(
+        base_thread_id=payload.thread_id,
+        itr_u_thread_id=itr_u_thread_id,
+        confirmed_by=confirmed_by,
+    )
+
+    return {
+        "base_thread_id": payload.thread_id,
+        "itr_u_thread_id": itr_u_thread_id,
+        "itr_u_record": itr_u_record,
+        "escalation_md": escalation["escalation_md"],
+        "seed_tax_facts": seed_facts,
+    }
+
+
+@router.get("/itr-u/{thread_id}")
+async def get_itr_u_state(thread_id: str) -> dict[str, Any]:
+    """Return the latest ITR-U record for *thread_id* (which can be the base thread)."""
+    await require_thread_state(thread_id)
+    record = await filing_runtime.latest_itr_u(thread_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="itr_u_not_found")
+    return record
