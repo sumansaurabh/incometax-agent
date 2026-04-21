@@ -16,12 +16,15 @@ import hashlib
 import json
 
 from ..state import AgentState
+from itx_backend.services.action_runtime import action_runtime, detect_sensitivity
 
 
 class ApprovalType(str, Enum):
     FILL_FIELD = "fill_field"        # Single field fill
     FILL_PAGE = "fill_page"          # All fields on a page
     FILL_PLAN = "fill_plan"          # Entire fill plan
+    BANK_CHANGE = "bank_change"      # Refund/bank change gate
+    REGIME_SWITCH = "regime_switch"  # Tax regime change gate
     SUBMIT_DRAFT = "submit_draft"    # Save as draft
     SUBMIT_FINAL = "submit_final"    # Final submission
     EVERIFY = "everify"              # E-verification handoff
@@ -86,6 +89,14 @@ CONSENT_TEXTS = {
     ApprovalType.FILL_PLAN: (
         "I authorize the agent to fill {total_fields} fields across {page_count} pages "
         "as shown in the fill plan. I have reviewed all values and confirm they are correct."
+    ),
+    ApprovalType.BANK_CHANGE: (
+        "⚠️ I authorize the agent to change refund-bank details on the Income Tax portal. "
+        "I have reviewed the bank name, account number, and IFSC carefully."
+    ),
+    ApprovalType.REGIME_SWITCH: (
+        "⚠️ I authorize the agent to change the selected tax regime on the portal. "
+        "I understand this can change deductions, tax liability, and filing outcome."
     ),
     ApprovalType.SUBMIT_DRAFT: (
         "I authorize saving the current return as a draft. This does not submit the return "
@@ -152,6 +163,8 @@ def create_approval_request(
         ApprovalType.FILL_FIELD: f"Fill '{details.get('field_label', 'field')}'",
         ApprovalType.FILL_PAGE: f"Fill {details.get('field_count', 0)} fields on {details.get('page_title', 'page')}",
         ApprovalType.FILL_PLAN: f"Execute fill plan with {details.get('total_fields', 0)} fields",
+        ApprovalType.BANK_CHANGE: "Approve bank account changes",
+        ApprovalType.REGIME_SWITCH: "Approve tax regime change",
         ApprovalType.SUBMIT_DRAFT: "Save return as draft",
         ApprovalType.SUBMIT_FINAL: "Submit final return to Income Tax Department",
         ApprovalType.EVERIFY: "Proceed to e-verification",
@@ -210,6 +223,20 @@ async def approval_gate(state: AgentState) -> dict[str, Any]:
         pending_approvals = state.get("pending_approvals", [])
         for approval in pending_approvals:
             if approval.get("approval_id") == approval_id:
+                await action_runtime.record_approval_decision(
+                    approval_key=approval_id,
+                    approved=approved,
+                    response_hash=hash_consent_response(
+                        approval.get("consent_text", ""),
+                        approved,
+                        user_id,
+                    ),
+                    rejection_reason=user_response.get("rejection_reason"),
+                    decision_payload={
+                        "consent_acknowledged": user_response.get("consent_acknowledged", False),
+                        "modifications": user_response.get("modifications"),
+                    },
+                )
                 response = ApprovalResponse(
                     approval_id=approval_id,
                     approved=approved,
@@ -219,6 +246,31 @@ async def approval_gate(state: AgentState) -> dict[str, Any]:
                     modifications=user_response.get("modifications"),
                     rejection_reason=user_response.get("rejection_reason"),
                 )
+
+                updated_pending_approvals = []
+                for current in pending_approvals:
+                    if current.get("approval_id") == approval_id:
+                        updated_pending_approvals.append(
+                            {
+                                **current,
+                                "status": ApprovalStatus.APPROVED.value if approved else ApprovalStatus.REJECTED.value,
+                                "responded_at": response.responded_at,
+                            }
+                        )
+                    else:
+                        updated_pending_approvals.append(current)
+
+                updated_fill_plan = state.get("fill_plan")
+                modifications = response.modifications or {}
+                if approved and modifications and updated_fill_plan:
+                    for page in updated_fill_plan.get("pages", []):
+                        for action in page.get("actions", []):
+                            action_modification = modifications.get(action.get("action_id"))
+                            if not action_modification:
+                                continue
+                            if "value" in action_modification:
+                                action["value"] = action_modification["value"]
+                                action["formatted_value"] = str(action_modification["value"])
                 
                 if approved:
                     message = f"✅ Approval granted for: {approval.get('description')}"
@@ -228,8 +280,16 @@ async def approval_gate(state: AgentState) -> dict[str, Any]:
                             "content": message,
                             "metadata": {"node": "approval_gate", "approved": True}
                         }],
-                        "approved_actions": approval.get("action_ids", []),
+                        "approved_actions": list({
+                            *state.get("approved_actions", []),
+                            *approval.get("action_ids", []),
+                        }),
                         "approval_status": "approved",
+                        "pending_approvals": updated_pending_approvals,
+                        "fill_plan": updated_fill_plan,
+                        "awaiting_approval": False,
+                        "current_approval_id": None,
+                        "last_user_response": {},
                         "response_hash": hash_consent_response(
                             approval.get("consent_text", ""),
                             True,
@@ -247,6 +307,10 @@ async def approval_gate(state: AgentState) -> dict[str, Any]:
                             "metadata": {"node": "approval_gate", "approved": False}
                         }],
                         "approval_status": "rejected",
+                        "pending_approvals": updated_pending_approvals,
+                        "awaiting_approval": False,
+                        "current_approval_id": None,
+                        "last_user_response": {},
                         "rejection_reason": response.rejection_reason
                     }
     
@@ -267,16 +331,48 @@ async def approval_gate(state: AgentState) -> dict[str, Any]:
         
     elif fill_plan and fill_plan.get("total_actions", 0) > 0:
         # Fill plan approval (Phase 3)
-        approval_type = ApprovalType.FILL_PLAN
-        details = {
-            "total_fields": fill_plan.get("total_actions", 0),
-            "page_count": len(fill_plan.get("pages", [])),
-        }
         action_ids = [
             action["action_id"]
             for page in fill_plan.get("pages", [])
             for action in page.get("actions", [])
         ]
+        field_ids = [
+            action.get("field_id", "")
+            for page in fill_plan.get("pages", [])
+            for action in page.get("actions", [])
+        ]
+        if any(field_id.startswith("bank.") for field_id in field_ids):
+            approval_type = ApprovalType.BANK_CHANGE
+            details = {
+                "page_title": "Bank Account",
+                "field_count": len(action_ids),
+            }
+        elif any("regime" in field_id for field_id in field_ids):
+            approval_type = ApprovalType.REGIME_SWITCH
+            details = {
+                "page_title": "Regime Choice",
+                "field_count": len(action_ids),
+            }
+        elif fill_plan.get("total_actions", 0) == 1:
+            action = fill_plan.get("pages", [{}])[0].get("actions", [{}])[0]
+            approval_type = ApprovalType.FILL_FIELD
+            details = {
+                "field_label": action.get("field_label", "field"),
+                "value": action.get("formatted_value") or action.get("value"),
+            }
+        elif len(fill_plan.get("pages", [])) == 1:
+            page = fill_plan.get("pages", [])[0]
+            approval_type = ApprovalType.FILL_PAGE
+            details = {
+                "field_count": len(page.get("actions", [])),
+                "page_title": page.get("page_title", "page"),
+            }
+        else:
+            approval_type = ApprovalType.FILL_PLAN
+            details = {
+                "total_fields": fill_plan.get("total_actions", 0),
+                "page_count": len(fill_plan.get("pages", [])),
+            }
     else:
         # Nothing to approve
         return {
@@ -291,6 +387,25 @@ async def approval_gate(state: AgentState) -> dict[str, Any]:
         user_id=user_id,
         details=details,
         action_ids=action_ids,
+    )
+
+    proposal_id = await action_runtime.create_proposal(
+        thread_id=thread_id,
+        proposal_type=approval_type.value,
+        dsl=fill_plan or pending_submission or {},
+        reason=request.description,
+        sensitivity=detect_sensitivity(fill_plan or {}),
+        expires_at=request.expires_at,
+    )
+    await action_runtime.create_approval(
+        thread_id=thread_id,
+        proposal_id=proposal_id,
+        kind=approval_type.value,
+        approval_key=request.approval_id,
+        description=request.description,
+        consent_text=request.consent_text,
+        action_ids=request.action_ids,
+        expires_at=request.expires_at,
     )
     
     # Build approval UI message
@@ -319,14 +434,17 @@ async def approval_gate(state: AgentState) -> dict[str, Any]:
         "messages": messages,
         "pending_approvals": state.get("pending_approvals", []) + [{
             "approval_id": request.approval_id,
+            "proposal_id": proposal_id,
             "approval_type": request.approval_type.value,
             "description": request.description,
             "consent_text": request.consent_text,
             "action_ids": request.action_ids,
             "created_at": request.created_at,
             "expires_at": request.expires_at,
+            "status": ApprovalStatus.PENDING.value,
         }],
         "awaiting_approval": True,
+        "action_proposal_id": proposal_id,
         "current_approval_id": request.approval_id,
     }
 

@@ -10,7 +10,8 @@ async def run(state: AgentState) -> AgentState:
     failed_readback = [
         x
         for x in executed
-        if not x.get("read_after_write", {}).get("ok", False)
+        if x.get("result") in {"readback_mismatch", "validation_error"}
+        or not x.get("read_after_write", {}).get("ok", False)
     ]
 
     needs_recovery = len(failed_readback) > 0
@@ -22,7 +23,7 @@ async def run(state: AgentState) -> AgentState:
             "field_label": first.get("field_label"),
             "page_type": first.get("page_type", "unknown"),
             "selector": first.get("selector"),
-            "error_type": "readback_mismatch",
+            "error_type": first.get("result", "readback_mismatch"),
         }
 
     messages = state.get("messages", [])

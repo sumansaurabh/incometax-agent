@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Fill-plan generator node — Phase 3 requirement.
 
@@ -186,9 +188,12 @@ def diff_portal_state(
             continue
         
         # Get evidence for confidence
-        evidence = fact_evidence.get(fact_key, {})
-        confidence = evidence.get("confidence", 0.8)
-        source_doc = evidence.get("source_document")
+        evidence_entries = fact_evidence.get(fact_key, [])
+        primary_evidence = evidence_entries[0] if isinstance(evidence_entries, list) and evidence_entries else {}
+        if isinstance(evidence_entries, dict):
+            primary_evidence = evidence_entries
+        confidence = primary_evidence.get("confidence", 0.8)
+        source_doc = primary_evidence.get("source_document") or primary_evidence.get("document_type")
         
         # Format value for display
         if isinstance(fact_value, (int, float)) and fact_key not in ["pan", "mobile", "ifsc"]:
@@ -219,6 +224,45 @@ def diff_portal_state(
     return actions
 
 
+def filter_fill_plan_result(
+    fill_plan_result: dict[str, Any],
+    page_type: str | None = None,
+    field_id: str | None = None,
+) -> dict[str, Any]:
+    pages = []
+    for page in fill_plan_result.get("pages", []):
+        if page_type and page.get("page_type") != page_type:
+            continue
+        actions = []
+        for action in page.get("actions", []):
+            if field_id and action.get("field_id") != field_id:
+                continue
+            actions.append(action)
+        if actions:
+            pages.append({**page, "actions": actions})
+
+    total_actions = sum(len(page.get("actions", [])) for page in pages)
+    high_conf = sum(
+        1
+        for page in pages
+        for action in page.get("actions", [])
+        if action.get("confidence_level") == FillConfidence.HIGH.value
+    )
+    low_conf = sum(
+        1
+        for page in pages
+        for action in page.get("actions", [])
+        if action.get("confidence_level") == FillConfidence.LOW.value
+    )
+    return {
+        **fill_plan_result,
+        "pages": pages,
+        "total_actions": total_actions,
+        "high_confidence_actions": high_conf,
+        "low_confidence_actions": low_conf,
+    }
+
+
 async def fill_plan(state: AgentState) -> dict[str, Any]:
     """
     Generate a fill plan by diffing tax facts against portal state.
@@ -233,6 +277,7 @@ async def fill_plan(state: AgentState) -> dict[str, Any]:
     portal_state = state.get("portal_state", {})
     portal_fields = portal_state.get("fields", {})
     fact_evidence = state.get("fact_evidence", {})
+    fill_target = state.get("fill_target", {}) or {}
     
     # Generate plan ID
     plan_id = hashlib.sha256(
@@ -325,7 +370,7 @@ async def fill_plan(state: AgentState) -> dict[str, Any]:
         }
     })
     
-    return {
+    fill_plan_payload = {
         "messages": messages,
         "fill_plan": {
             "plan_id": fill_plan_result.plan_id,
@@ -340,14 +385,17 @@ async def fill_plan(state: AgentState) -> dict[str, Any]:
                     "actions": [
                         {
                             "action_id": a.action_id,
+                            "field_id": a.field_id,
                             "field_label": a.field_label,
                             "selector": a.selector,
                             "value": a.value,
                             "formatted_value": a.formatted_value,
+                            "source_fact_id": a.source_fact_id,
                             "confidence": a.confidence,
                             "confidence_level": a.confidence_level.value,
                             "requires_approval": a.requires_approval,
                             "source_document": a.source_document,
+                            "page_type": p.page_type,
                         }
                         for a in p.actions
                     ]
@@ -357,6 +405,15 @@ async def fill_plan(state: AgentState) -> dict[str, Any]:
         },
         "awaiting_approval": total_actions > 0
     }
+
+    if fill_target:
+        fill_plan_payload["fill_plan"] = filter_fill_plan_result(
+            fill_plan_payload["fill_plan"],
+            page_type=fill_target.get("page_type"),
+            field_id=fill_target.get("field_id"),
+        )
+        fill_plan_payload["awaiting_approval"] = fill_plan_payload["fill_plan"].get("total_actions", 0) > 0
+    return fill_plan_payload
 
 
 # Legacy interface

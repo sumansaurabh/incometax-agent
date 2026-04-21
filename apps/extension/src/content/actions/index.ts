@@ -5,12 +5,21 @@ import { fillField } from "./fill";
 import { readField } from "./read";
 import { getValidationErrors } from "./validation";
 
-type Action =
+export type Action =
   | { type: "fill"; selector: string; value: string }
   | { type: "click"; selector: string }
   | { type: "read"; selector: string }
   | { type: "get_form_schema" }
   | { type: "get_validation_errors" };
+
+type ActionBatchResult = {
+  action: Action;
+  output: unknown;
+  readAfterWrite?: {
+    ok: boolean;
+    observedValue: string;
+  };
+};
 
 export function executeAction(action: unknown): unknown {
   const parsed = action as Action;
@@ -30,4 +39,36 @@ export function executeAction(action: unknown): unknown {
     default:
       throw new Error("Unsupported action type");
   }
+}
+
+export async function executeActionBatch(actions: unknown[]): Promise<{
+  results: ActionBatchResult[];
+  validationErrors: Array<{ field: string; message: string }>;
+}> {
+  const parsedActions = actions as Action[];
+  const results: ActionBatchResult[] = [];
+
+  for (const action of parsedActions) {
+    const output = executeAction(action);
+    if (action.type === "fill") {
+      const observedValue = String(readField(action.selector) ?? "");
+      results.push({
+        action,
+        output,
+        readAfterWrite: {
+          ok: observedValue === String(action.value),
+          observedValue,
+        },
+      });
+      continue;
+    }
+
+    results.push({ action, output });
+  }
+
+  return {
+    results,
+    validationErrors:
+      (executeAction({ type: "get_validation_errors" }) as Array<{ field: string; message: string }>) ?? [],
+  };
 }
