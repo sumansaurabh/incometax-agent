@@ -3,6 +3,37 @@ from __future__ import annotations
 from itx_backend.agent.state import AgentState
 
 
+def _set_nested_evidence(evidence: dict, key_path: str, source_document: str, confidence: float) -> None:
+    evidence[key_path] = {
+        "source_document": source_document,
+        "confidence": confidence,
+    }
+
+
+def _merge_tax_fact(
+    target: dict,
+    evidence: dict,
+    key: str,
+    value,
+    source_document: str,
+    confidence: float,
+    parent_path: str = "",
+) -> None:
+    key_path = f"{parent_path}.{key}" if parent_path else key
+    if isinstance(value, dict):
+        existing = target.get(key)
+        if not isinstance(existing, dict):
+            existing = {}
+        merged = dict(existing)
+        for child_key, child_value in value.items():
+            _merge_tax_fact(merged, evidence, child_key, child_value, source_document, confidence, key_path)
+        target[key] = merged
+        return
+
+    target[key] = value
+    _set_nested_evidence(evidence, key_path, source_document, confidence)
+
+
 async def run(state: AgentState) -> AgentState:
     tax_facts = dict(state.get("tax_facts", {}))
     documents = state.get("documents", [])
@@ -16,11 +47,14 @@ async def run(state: AgentState) -> AgentState:
         for key, value in fields.items():
             if value is None:
                 continue
-            tax_facts[key] = value
-            fact_evidence[key] = {
-                "source_document": doc.get("id") or doc.get("name", "unknown"),
-                "confidence": float(doc.get("confidence", 0.85)),
-            }
+            _merge_tax_fact(
+                tax_facts,
+                fact_evidence,
+                key,
+                value,
+                doc.get("id") or doc.get("name", "unknown"),
+                float(doc.get("parser_confidence", doc.get("confidence", 0.85))),
+            )
 
         # Fallback from entities for key identifiers.
         for entity in entities:

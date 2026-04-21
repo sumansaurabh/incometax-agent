@@ -1,0 +1,9 @@
+{
+  "title": "HousePropertyIncome",
+  "type": "object",
+  "properties": {
+    "net": { "type": "number" },
+    "loanInterest": { "type": "number" }
+  },
+  "required": ["net", "loanInterest"]
+}

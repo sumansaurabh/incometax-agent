@@ -26,7 +26,9 @@ class AgentState(BaseModel):
     pending_submission: Optional[dict[str, Any]] = None
     learned_mappings: dict[str, Any] = Field(default_factory=dict)
     documents: list[dict[str, Any]] = Field(default_factory=list)
+    rejected_documents: list[dict[str, Any]] = Field(default_factory=list)
     reconciliation: dict[str, Any] = Field(default_factory=dict)
+    fact_evidence: dict[str, Any] = Field(default_factory=dict)
     answered_questions: set[str] = Field(default_factory=set)
 
     def get(self, key: str, default: Any = None) -> Any:

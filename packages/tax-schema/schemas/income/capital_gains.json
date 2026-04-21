@@ -1,0 +1,9 @@
+{
+  "title": "CapitalGainsIncome",
+  "type": "object",
+  "properties": {
+    "stcg": { "type": "number" },
+    "ltcg": { "type": "number" }
+  },
+  "required": ["stcg", "ltcg"]
+}

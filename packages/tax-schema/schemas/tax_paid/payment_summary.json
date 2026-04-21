@@ -1,0 +1,11 @@
+{
+  "title": "TaxPaidSummary",
+  "type": "object",
+  "properties": {
+    "tdsSalary": { "type": "number" },
+    "tdsOther": { "type": "number" },
+    "advanceTax": { "type": "number" },
+    "selfAssessmentTax": { "type": "number" }
+  },
+  "required": ["tdsSalary", "tdsOther", "advanceTax", "selfAssessmentTax"]
+}

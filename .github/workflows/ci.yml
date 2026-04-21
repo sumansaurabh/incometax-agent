@@ -55,5 +55,7 @@ jobs:
         run: PYTHONPATH=apps/backend/src:apps/workers/src:packages/rules-core/src python -m unittest discover -s apps/backend/tests/agent -p 'test_*.py'
       - name: Backend API Tests
         run: PYTHONPATH=apps/backend/src:apps/workers/src:packages/rules-core/src python -m unittest discover -s apps/backend/tests/api -p 'test_*.py'
+      - name: Workers Tests
+        run: PYTHONPATH=apps/backend/src:apps/workers/src:packages/rules-core/src python -m unittest discover -s apps/workers/tests -p 'test_*.py'
       - name: Rules Unit Tests
         run: PYTHONPATH=apps/backend/src:apps/workers/src:packages/rules-core/src python -m unittest discover -s packages/rules-core/tests/cases -p 'test_*.py'
