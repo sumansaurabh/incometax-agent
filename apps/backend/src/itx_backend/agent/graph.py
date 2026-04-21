@@ -1,3 +1,5 @@
+from typing import Awaitable, Callable
+
 from itx_backend.agent.nodes import (
     approval_gate,
     archive,
@@ -23,9 +25,12 @@ from itx_backend.agent.checkpointer import checkpointer
 from itx_backend.agent.state import AgentState
 
 
+NodeRunner = Callable[[AgentState], Awaitable[AgentState]]
+
+
 class AgentGraph:
     def __init__(self) -> None:
-        self._nodes = [
+        self._nodes: list[NodeRunner] = [
             bootstrap.run,
             revised_return.run,
             portal_scan.run,
@@ -48,10 +53,10 @@ class AgentGraph:
             archive.run,
         ]
 
-    def run(self, state: AgentState) -> AgentState:
+    async def run(self, state: AgentState) -> AgentState:
         for node in self._nodes:
-            state = node(state)
-            checkpointer.save(state)
+            state = await node(state)
+            await checkpointer.save(state)
         return state
 
 

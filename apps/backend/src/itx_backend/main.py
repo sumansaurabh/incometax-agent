@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi import Request
 from fastapi.responses import JSONResponse
@@ -18,6 +20,7 @@ from itx_backend.api import (
     websocket,
 )
 from itx_backend.config import settings
+from itx_backend.db.session import close_connection_pool, init_connection_pool
 from itx_backend.security.anomaly import anomaly_detector
 from itx_backend.security.rate_limit import FixedWindowRateLimiter
 from itx_backend.telemetry.tracing import setup_tracing
@@ -26,9 +29,18 @@ from itx_backend.telemetry.tracing import setup_tracing
 limiter = FixedWindowRateLimiter(limit=500)
 
 
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    await init_connection_pool()
+    try:
+        yield
+    finally:
+        await close_connection_pool()
+
+
 def create_app() -> FastAPI:
     setup_tracing()
-    app = FastAPI(title=settings.app_name, version=settings.app_version)
+    app = FastAPI(title=settings.app_name, version=settings.app_version, lifespan=lifespan)
 
     @app.middleware("http")
     async def request_guard(request: Request, call_next):
@@ -60,7 +72,7 @@ def create_app() -> FastAPI:
     app.include_router(websocket.router)
 
     @app.get("/health")
-    def health() -> dict[str, str]:
+    async def health() -> dict[str, str]:
         return {"status": "ok"}
 
     return app

@@ -338,8 +338,7 @@ async def recovery(state: AgentState) -> dict[str, Any]:
 
 
 # Legacy interface
-def run(state: AgentState) -> AgentState:
-    import asyncio
-    result = asyncio.run(recovery(state))
+async def run(state: AgentState) -> AgentState:
+    result = await recovery(state)
     state.apply_update(result)
     return state

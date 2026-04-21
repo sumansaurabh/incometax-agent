@@ -77,9 +77,7 @@ async def revised_return(state: AgentState) -> dict[str, Any]:
     }
 
 
-def run(state: AgentState) -> AgentState:
-    import asyncio
-
-    updates = asyncio.run(revised_return(state))
+async def run(state: AgentState) -> AgentState:
+    updates = await revised_return(state)
     state.apply_update(updates)
     return state

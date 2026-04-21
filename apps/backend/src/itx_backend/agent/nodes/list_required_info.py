@@ -317,9 +317,7 @@ async def list_required_info(state: AgentState) -> dict[str, Any]:
     }
 
 
-def run(state: AgentState) -> AgentState:
-    import asyncio
-
-    result = asyncio.run(list_required_info(state))
+async def run(state: AgentState) -> AgentState:
+    result = await list_required_info(state)
     state.apply_update(result)
     return state

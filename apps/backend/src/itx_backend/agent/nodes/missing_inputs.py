@@ -377,8 +377,7 @@ async def missing_inputs(state: AgentState) -> dict[str, Any]:
 
 
 # Legacy interface
-def run(state: AgentState) -> AgentState:
-    import asyncio
-    result = asyncio.run(missing_inputs(state))
+async def run(state: AgentState) -> AgentState:
+    result = await missing_inputs(state)
     state.apply_update(result)
     return state

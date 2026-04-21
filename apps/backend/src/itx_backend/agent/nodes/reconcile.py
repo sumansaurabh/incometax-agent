@@ -13,7 +13,7 @@ def _severity(diff_ratio: float) -> str:
     return "under-reporting"
 
 
-def run(state: AgentState) -> AgentState:
+async def run(state: AgentState) -> AgentState:
     tax_facts = state.get("tax_facts", {})
     ais = state.get("ais_facts", {})
 

@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from itx_backend.agent.state import AgentState
 
 
-def run(state: AgentState) -> AgentState:
+async def run(state: AgentState) -> AgentState:
     fill_plan = state.get("fill_plan", {})
     approved_actions = set(state.get("approved_actions", []))
     executed = []

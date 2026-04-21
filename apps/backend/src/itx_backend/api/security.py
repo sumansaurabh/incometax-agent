@@ -6,5 +6,5 @@ router = APIRouter(prefix="/api/security", tags=["security"])
 
 
 @router.get("/anomalies")
-def anomalies(limit: int = 50) -> dict:
+async def anomalies(limit: int = 50) -> dict:
     return {"items": anomaly_detector.recent(limit=limit)}

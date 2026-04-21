@@ -332,8 +332,7 @@ async def approval_gate(state: AgentState) -> dict[str, Any]:
 
 
 # Legacy interface
-def run(state: AgentState) -> AgentState:
-    import asyncio
-    result = asyncio.run(approval_gate(state))
+async def run(state: AgentState) -> AgentState:
+    result = await approval_gate(state)
     state.apply_update(result)
     return state

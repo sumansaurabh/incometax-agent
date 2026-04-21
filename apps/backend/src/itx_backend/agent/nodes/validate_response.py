@@ -3,7 +3,7 @@ from __future__ import annotations
 from itx_backend.agent.state import AgentState
 
 
-def run(state: AgentState) -> AgentState:
+async def run(state: AgentState) -> AgentState:
     executed = state.get("executed_actions", [])
     blocked = state.get("blocked_actions", [])
 

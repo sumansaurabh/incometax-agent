@@ -23,7 +23,7 @@ class ReplayRequest(BaseModel):
 
 
 @router.post("/capture")
-def capture(payload: CaptureSnapshotRequest) -> dict:
+async def capture(payload: CaptureSnapshotRequest) -> dict:
     snapshot = replay_harness.capture_snapshot(
         thread_id=payload.thread_id,
         page_type=payload.page_type,
@@ -39,7 +39,7 @@ def capture(payload: CaptureSnapshotRequest) -> dict:
 
 
 @router.post("/run")
-def replay(payload: ReplayRequest) -> dict:
+async def replay(payload: ReplayRequest) -> dict:
     run = replay_harness.replay(payload.snapshot_id, payload.expected_selectors)
     return {
         "run_id": run.run_id,
@@ -50,10 +50,10 @@ def replay(payload: ReplayRequest) -> dict:
 
 
 @router.get("/snapshots")
-def snapshots(thread_id: Optional[str] = None) -> dict:
+async def snapshots(thread_id: Optional[str] = None) -> dict:
     return {"items": replay_harness.list_snapshots(thread_id=thread_id)}
 
 
 @router.get("/runs")
-def runs() -> dict:
+async def runs() -> dict:
     return {"items": replay_harness.list_runs()}

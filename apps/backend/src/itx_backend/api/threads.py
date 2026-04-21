@@ -19,25 +19,25 @@ class ThreadStartRequest(BaseModel):
 
 
 @router.post("/start")
-def start_thread(payload: ThreadStartRequest) -> AgentState:
+async def start_thread(payload: ThreadStartRequest) -> AgentState:
     state = AgentState(thread_id=str(uuid.uuid4()), user_id=payload.user_id)
     analytics_service.track("thread_started", "bootstrap", state.thread_id, {"user_id": payload.user_id})
-    final_state = graph.run(state)
+    final_state = await graph.run(state)
     analytics_service.track("thread_completed", "archive", state.thread_id, {"archived": final_state.archived})
     return final_state
 
 
 @router.get("/{thread_id}")
-def get_thread(thread_id: str) -> Union[AgentState, dict[str, str]]:
-    state = checkpointer.latest(thread_id)
+async def get_thread(thread_id: str) -> Union[AgentState, dict[str, str]]:
+    state = await checkpointer.latest(thread_id)
     if not state:
         return {"error": "thread_not_found"}
     return state
 
 
 @router.get("/{thread_id}/history")
-def get_thread_history(thread_id: str) -> dict[str, Any]:
-    history = checkpointer.history(thread_id)
+async def get_thread_history(thread_id: str) -> dict[str, Any]:
+    history = await checkpointer.history(thread_id)
     if not history:
         return {"error": "thread_not_found"}
     return {

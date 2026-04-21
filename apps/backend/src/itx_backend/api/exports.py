@@ -13,7 +13,7 @@ class OfflineExportRequest(BaseModel):
 
 
 @router.post("/offline-json")
-def export_offline_json(payload: OfflineExportRequest) -> dict:
+async def export_offline_json(payload: OfflineExportRequest) -> dict:
     result = offline_exporter.export(
         tax_facts=payload.tax_facts,
         assessment_year=payload.assessment_year,

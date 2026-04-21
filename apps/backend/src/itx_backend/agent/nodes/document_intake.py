@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from itx_backend.agent.state import AgentState
 
 
-def run(state: AgentState) -> AgentState:
+async def run(state: AgentState) -> AgentState:
     docs = state.get("documents", [])
     accepted = []
     rejected = []

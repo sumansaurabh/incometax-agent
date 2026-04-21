@@ -10,6 +10,6 @@ class ActionDecision(BaseModel):
 
 
 @router.post("/decision")
-def decision(payload: ActionDecision) -> dict[str, str]:
+async def decision(payload: ActionDecision) -> dict[str, str]:
     status = "approved" if payload.approved else "rejected"
     return {"proposal_id": payload.proposal_id, "status": status}

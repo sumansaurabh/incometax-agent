@@ -340,9 +340,7 @@ async def explain_current_step(state: AgentState) -> dict[str, Any]:
     }
 
 
-def run(state: AgentState) -> AgentState:
-    import asyncio
-
-    result = asyncio.run(explain_current_step(state))
+async def run(state: AgentState) -> AgentState:
+    result = await explain_current_step(state)
     state.apply_update(result)
     return state

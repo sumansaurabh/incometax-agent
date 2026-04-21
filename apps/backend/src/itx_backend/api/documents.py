@@ -12,7 +12,7 @@ class UploadInitRequest(BaseModel):
 
 
 @router.post("/signed-upload")
-def signed_upload(payload: UploadInitRequest) -> dict[str, str]:
+async def signed_upload(payload: UploadInitRequest) -> dict[str, str]:
     doc_id = str(uuid.uuid4())
     return {
         "document_id": doc_id,

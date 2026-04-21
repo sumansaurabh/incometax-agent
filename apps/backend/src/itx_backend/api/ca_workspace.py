@@ -6,20 +6,17 @@ router = APIRouter(prefix="/api/ca", tags=["ca-workspace"])
 
 
 @router.get("/clients")
-def clients() -> dict:
+async def clients() -> dict:
     items = []
-    for thread_id in checkpointer.list_thread_ids():
-        latest = checkpointer.latest(thread_id)
-        if not latest:
-            continue
-        tax_facts = latest.get("tax_facts", {})
-        submission = latest.get("submission_summary", {})
+    for latest in await checkpointer.list_latest_states():
+        tax_facts = latest.tax_facts or {}
+        submission = latest.submission_summary or {}
         items.append(
             {
-                "thread_id": thread_id,
+                "thread_id": latest.thread_id,
                 "pan": tax_facts.get("pan"),
                 "name": tax_facts.get("name"),
-                "itr_type": latest.get("itr_type"),
+                "itr_type": latest.itr_type,
                 "assessment_year": submission.get("assessment_year"),
                 "can_submit": submission.get("can_submit"),
                 "blocking_issues": submission.get("blocking_issues", []),
@@ -29,14 +26,14 @@ def clients() -> dict:
 
 
 @router.get("/client/{thread_id}")
-def client_detail(thread_id: str) -> dict:
-    state = checkpointer.latest(thread_id)
+async def client_detail(thread_id: str) -> dict:
+    state = await checkpointer.latest(thread_id)
     if not state:
         return {"error": "thread_not_found"}
     return {
         "thread_id": thread_id,
-        "tax_facts": state.get("tax_facts", {}),
-        "submission_summary": state.get("submission_summary", {}),
-        "pending_approvals": state.get("pending_approvals", []),
-        "messages": state.get("messages", []),
+        "tax_facts": state.tax_facts,
+        "submission_summary": state.submission_summary or {},
+        "pending_approvals": state.pending_approvals,
+        "messages": state.messages,
     }

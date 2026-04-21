@@ -362,8 +362,7 @@ async def fill_plan(state: AgentState) -> dict[str, Any]:
 
 
 # Legacy interface
-def run(state: AgentState) -> AgentState:
-    import asyncio
-    result = asyncio.run(fill_plan(state))
+async def run(state: AgentState) -> AgentState:
+    result = await fill_plan(state)
     state.apply_update(result)
     return state

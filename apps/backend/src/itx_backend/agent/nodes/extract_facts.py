@@ -3,7 +3,7 @@ from __future__ import annotations
 from itx_backend.agent.state import AgentState
 
 
-def run(state: AgentState) -> AgentState:
+async def run(state: AgentState) -> AgentState:
     tax_facts = dict(state.get("tax_facts", {}))
     documents = state.get("documents", [])
     fact_evidence = dict(state.get("fact_evidence", {}))

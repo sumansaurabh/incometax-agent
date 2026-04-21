@@ -1,7 +1,7 @@
 from itx_backend.agent.state import AgentState
 
 
-def run(state: AgentState) -> AgentState:
+async def run(state: AgentState) -> AgentState:
     if state.portal_page == "unknown":
         state.portal_page = "dashboard"
     state.current_page = state.portal_page

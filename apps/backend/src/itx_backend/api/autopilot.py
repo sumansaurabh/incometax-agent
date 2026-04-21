@@ -7,6 +7,6 @@ router = APIRouter(prefix="/api/autopilot", tags=["autopilot"])
 
 
 @router.post("/portal-drift")
-def run_portal_drift_autopilot() -> dict:
+async def run_portal_drift_autopilot() -> dict:
     items = get_drift_telemetry().export_for_training()
     return portal_drift_autopilot.run(items)

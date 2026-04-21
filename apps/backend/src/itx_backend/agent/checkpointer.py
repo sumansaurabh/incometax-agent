@@ -1,92 +1,86 @@
 from __future__ import annotations
 
 import json
-import sqlite3
-from pathlib import Path
-from threading import Lock
+from typing import Any, Awaitable, Callable, Optional
 
 from itx_backend.agent.state import AgentState
-from itx_backend.config import settings
+from itx_backend.db.session import get_pool
 
 
-class SQLiteCheckpointer:
-    def __init__(self, db_path: str | Path) -> None:
-        self._db_path = Path(db_path)
-        self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._lock = Lock()
-        self._initialize()
+PoolProvider = Callable[[], Awaitable[Any]]
 
-    def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self._db_path)
-        connection.row_factory = sqlite3.Row
-        return connection
-
-    def _initialize(self) -> None:
-        with self._connect() as connection:
-            connection.execute(
-                """
-                create table if not exists agent_checkpoints (
-                    id integer primary key autoincrement,
-                    thread_id text not null,
-                    current_node text not null,
-                    state_json text not null,
-                    created_at text not null default (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-                )
-                """
-            )
-            connection.execute(
-                "create index if not exists idx_agent_checkpoints_thread_id on agent_checkpoints(thread_id, id)"
-            )
+class AsyncPostgresCheckpointer:
+    def __init__(self, pool_provider: PoolProvider = get_pool) -> None:
+        self._pool_provider = pool_provider
 
     def _deserialize(self, payload: str) -> AgentState:
         return AgentState.model_validate(json.loads(payload))
 
-    def save(self, state: AgentState) -> None:
+    async def save(self, state: AgentState) -> None:
         payload = json.dumps(state.model_dump(mode="json"), sort_keys=True)
-        with self._lock, self._connect() as connection:
-            connection.execute(
+        pool = await self._pool_provider()
+        async with pool.acquire() as connection:
+            await connection.execute(
                 """
                 insert into agent_checkpoints (thread_id, current_node, state_json)
-                values (?, ?, ?)
+                values ($1, $2, $3::jsonb)
                 """,
-                (state.thread_id, state.current_node, payload),
+                state.thread_id,
+                state.current_node,
+                payload,
             )
 
-    def latest(self, thread_id: str) -> AgentState | None:
-        with self._connect() as connection:
-            row = connection.execute(
+    async def latest(self, thread_id: str) -> Optional[AgentState]:
+        pool = await self._pool_provider()
+        async with pool.acquire() as connection:
+            row = await connection.fetchrow(
                 """
-                select state_json
+                select state_json::text as state_json
                 from agent_checkpoints
-                where thread_id = ?
+                where thread_id = $1
                 order by id desc
                 limit 1
                 """,
-                (thread_id,),
-            ).fetchone()
+                thread_id,
+            )
         if not row:
             return None
         return self._deserialize(row["state_json"])
 
-    def list_thread_ids(self) -> list[str]:
-        with self._connect() as connection:
-            rows = connection.execute(
+    async def list_thread_ids(self) -> list[str]:
+        pool = await self._pool_provider()
+        async with pool.acquire() as connection:
+            rows = await connection.fetch(
                 "select distinct thread_id from agent_checkpoints order by thread_id"
-            ).fetchall()
+            )
         return [row["thread_id"] for row in rows]
 
-    def history(self, thread_id: str) -> list[AgentState]:
-        with self._connect() as connection:
-            rows = connection.execute(
+    async def history(self, thread_id: str) -> list[AgentState]:
+        pool = await self._pool_provider()
+        async with pool.acquire() as connection:
+            rows = await connection.fetch(
                 """
-                select state_json
+                select state_json::text as state_json
                 from agent_checkpoints
-                where thread_id = ?
+                where thread_id = $1
                 order by id asc
                 """,
-                (thread_id,),
-            ).fetchall()
+                thread_id,
+            )
         return [self._deserialize(row["state_json"]) for row in rows]
 
 
-checkpointer = SQLiteCheckpointer(settings.checkpoint_db_path)
+    async def list_latest_states(self) -> list[AgentState]:
+        pool = await self._pool_provider()
+        async with pool.acquire() as connection:
+            rows = await connection.fetch(
+                """
+                select distinct on (thread_id) state_json::text as state_json
+                from agent_checkpoints
+                order by thread_id, id desc
+                """
+            )
+        return [self._deserialize(row["state_json"]) for row in rows]
+
+
+checkpointer = AsyncPostgresCheckpointer()

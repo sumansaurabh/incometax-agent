@@ -500,8 +500,7 @@ async def submission_summary(state: AgentState) -> dict[str, Any]:
 
 
 # Legacy interface
-def run(state: AgentState) -> AgentState:
-    import asyncio
-    result = asyncio.run(submission_summary(state))
+async def run(state: AgentState) -> AgentState:
+    result = await submission_summary(state)
     state.apply_update(result)
     return state

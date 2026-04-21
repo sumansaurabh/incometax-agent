@@ -332,8 +332,7 @@ async def everify_handoff(state: AgentState) -> dict[str, Any]:
 
 
 # Legacy interface
-def run(state: AgentState) -> AgentState:
-    import asyncio
-    result = asyncio.run(everify_handoff(state))
+async def run(state: AgentState) -> AgentState:
+    result = await everify_handoff(state)
     state.apply_update(result)
     return state

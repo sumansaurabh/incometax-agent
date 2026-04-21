@@ -27,7 +27,7 @@ class DriftEventRequest(BaseModel):
 
 
 @router.post("/event")
-def create_event(payload: DriftEventRequest) -> dict:
+async def create_event(payload: DriftEventRequest) -> dict:
     event = get_drift_telemetry().log_drift(
         drift_type=payload.drift_type,
         severity=payload.severity,
@@ -44,10 +44,10 @@ def create_event(payload: DriftEventRequest) -> dict:
 
 
 @router.get("/stats")
-def stats() -> dict:
+async def stats() -> dict:
     return get_drift_telemetry().get_statistics()
 
 
 @router.get("/training-export")
-def training_export() -> dict:
+async def training_export() -> dict:
     return {"items": get_drift_telemetry().export_for_training()}
