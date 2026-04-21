@@ -16,6 +16,7 @@ from itx_backend.api.actions import (
     thread_actions,
     undo,
 )
+from itx_backend.api.threads import ThreadEnsureRequest, ensure_thread
 from itx_backend.db.session import close_connection_pool, get_pool, init_connection_pool
 
 
@@ -169,3 +170,84 @@ class ActionsApiTest(unittest.IsolatedAsyncioTestCase):
         activity = await thread_actions("thread-actions-2")
         self.assertEqual(activity["approvals"][0]["kind"], "bank_change")
         self.assertEqual(len(activity["executions"]), 2)
+
+    async def test_ensure_thread_and_browser_reported_execution(self) -> None:
+        ensured = await ensure_thread(ThreadEnsureRequest(user_id="user-3"))
+        self.assertEqual(ensured.user_id, "user-3")
+
+        await checkpointer.save(
+            AgentState(
+                thread_id=ensured.thread_id,
+                user_id="user-3",
+                current_page="salary-schedule",
+                portal_state={
+                    "page": "salary-schedule",
+                    "fields": {
+                        "#grossSalary": {"value": ""},
+                    },
+                    "validationErrors": [],
+                },
+                tax_facts={
+                    "assessment_year": "2025-26",
+                    "gross_salary": 2500000,
+                },
+                fact_evidence={
+                    "gross_salary": [{"document_type": "form16"}],
+                },
+            )
+        )
+
+        planned = await proposal(
+            ProposalRequest(
+                thread_id=ensured.thread_id,
+                page_type="salary-schedule",
+            )
+        )
+        approval_id = planned["pending_approvals"][0]["approval_id"]
+        await decision(
+            ActionDecision(
+                thread_id=ensured.thread_id,
+                approval_id=approval_id,
+                approved=True,
+            )
+        )
+
+        first_action = planned["fill_plan"]["pages"][0]["actions"][0]
+        executed = await execute(
+            ActionExecutionRequest(
+                thread_id=ensured.thread_id,
+                portal_state_before={
+                    "page": "salary-schedule",
+                    "fields": {
+                        "#grossSalary": {"value": ""},
+                    },
+                    "validationErrors": [],
+                },
+                portal_state_after={
+                    "page": "salary-schedule",
+                    "fields": {
+                        "#grossSalary": {"value": 2500000},
+                    },
+                    "validationErrors": [],
+                },
+                execution_results=[
+                    {
+                        **first_action,
+                        "result": "ok",
+                        "read_after_write": {
+                            "ok": True,
+                            "observed_value": 2500000,
+                            "previous_value": "",
+                        },
+                    }
+                ],
+                validation_errors=[],
+            )
+        )
+
+        self.assertEqual(executed["validation_summary"]["executed"], 1)
+        self.assertEqual(executed["portal_state"]["fields"]["#grossSalary"]["value"], 2500000)
+
+        activity = await thread_actions(ensured.thread_id)
+        self.assertEqual(len(activity["executions"]), 1)
+        self.assertEqual(activity["executions"][0]["results"]["executed_actions"][0]["read_after_write"]["previous_value"], "")

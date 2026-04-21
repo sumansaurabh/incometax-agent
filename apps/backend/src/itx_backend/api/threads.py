@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any, Union
+from typing import Any, Optional, Union
 
 from fastapi import APIRouter
 from pydantic import BaseModel
@@ -18,6 +18,11 @@ class ThreadStartRequest(BaseModel):
     user_id: str
 
 
+class ThreadEnsureRequest(BaseModel):
+    user_id: str
+    thread_id: Optional[str] = None
+
+
 @router.post("/start")
 async def start_thread(payload: ThreadStartRequest) -> AgentState:
     state = AgentState(thread_id=str(uuid.uuid4()), user_id=payload.user_id)
@@ -25,6 +30,19 @@ async def start_thread(payload: ThreadStartRequest) -> AgentState:
     final_state = await graph.run(state)
     analytics_service.track("thread_completed", "archive", state.thread_id, {"archived": final_state.archived})
     return final_state
+
+
+@router.post("/ensure")
+async def ensure_thread(payload: ThreadEnsureRequest) -> AgentState:
+    if payload.thread_id:
+        existing = await checkpointer.latest(payload.thread_id)
+        if existing:
+            return existing
+
+    state = AgentState(thread_id=payload.thread_id or str(uuid.uuid4()), user_id=payload.user_id)
+    await checkpointer.save(state)
+    analytics_service.track("thread_ensured", "bootstrap", state.thread_id, {"user_id": payload.user_id})
+    return state
 
 
 @router.get("/{thread_id}")

@@ -31,6 +31,8 @@ class AgentState(BaseModel):
     reconciliation: dict[str, Any] = Field(default_factory=dict)
     fact_evidence: dict[str, Any] = Field(default_factory=dict)
     ais_facts: dict[str, Any] = Field(default_factory=dict)
+    fill_target: dict[str, Any] = Field(default_factory=dict)
+    browser_execution: Optional[dict[str, Any]] = None
     executed_actions: list[dict[str, Any]] = Field(default_factory=list)
     blocked_actions: list[dict[str, Any]] = Field(default_factory=list)
     validation_summary: dict[str, Any] = Field(default_factory=dict)

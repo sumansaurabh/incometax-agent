@@ -31,6 +31,10 @@ class ActionDecision(BaseModel):
 class ActionExecutionRequest(BaseModel):
     thread_id: str
     portal_state: Optional[dict[str, Any]] = None
+    portal_state_before: Optional[dict[str, Any]] = None
+    portal_state_after: Optional[dict[str, Any]] = None
+    execution_results: list[dict[str, Any]] = Field(default_factory=list)
+    validation_errors: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class UndoExecutionRequest(BaseModel):
@@ -107,7 +111,16 @@ async def execute(payload: ActionExecutionRequest) -> dict[str, Any]:
     if not state:
         raise HTTPException(status_code=404, detail="thread_not_found")
 
-    if payload.portal_state is not None:
+    if payload.execution_results:
+        state.browser_execution = {
+            "portal_state_before": payload.portal_state_before or state.portal_state,
+            "portal_state_after": payload.portal_state_after or payload.portal_state or state.portal_state,
+            "execution_results": payload.execution_results,
+            "validation_errors": payload.validation_errors,
+        }
+        if payload.portal_state_before is not None:
+            state.portal_state = payload.portal_state_before
+    elif payload.portal_state is not None:
         state.portal_state = payload.portal_state
 
     state = await execute_actions.run(state)
