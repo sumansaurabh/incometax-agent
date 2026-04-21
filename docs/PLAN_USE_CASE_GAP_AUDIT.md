@@ -19,12 +19,18 @@ Implemented after the original audit:
 - Document upload/storage, extraction, normalization, evidence persistence, health-insurance parsing, and AIS-vs-doc reconciliation.
 - Durable proposals, approvals, executions, undo, and browser-reported read-after-write for guided autofill.
 - Completion-flow runtime with persisted `submission_summaries`, `consents`, `everification_status`, `filed_return_artifacts`, and `revision_threads`, plus filing APIs and sidepanel UI.
+- Device-bound auth/session lifecycle, authenticated API + WebSocket access, consent revocation, retention-driven purge jobs, and verified-host / lookalike-domain protection in the extension.
+- Validation-error translation, regime comparison with targeted regime-switch proposals, unsupported-flow assessment with guided-checklist downgrade, durable CA handoff packages, and thread quarantine on anomaly detection.
+- Prompt-injection-aware document screening that flags risky uploads and blocks high-risk text documents before fact extraction.
 
 Validation performed after these implementations:
 
 - `PYTHONPATH=apps/backend/src:apps/workers/src ITX_DATABASE_URL=postgresql://itx:itx@localhost:5432/itx python -m pytest apps/backend/tests/api/test_actions.py apps/backend/tests/api/test_filing.py` passed.
 - `PYTHONPATH=apps/backend/src:apps/workers/src python -m compileall apps/backend/src apps/workers/src` passed.
 - `pnpm --filter @itx/extension typecheck` passed.
+- `PYTHONPATH=apps/backend/src:apps/workers/src:packages/rules-core/src PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 pytest apps/backend/tests/api/test_review_workspace.py` passed.
+- `python -m compileall apps/backend/src apps/workers/src` passed after the new support-assessment, quarantine, and document-security changes.
+- `pnpm --filter @itx/extension build` passed after wiring validation help, regime preview, support-status, handoff, and quarantine UI.
 
 What is still materially pending now is concentrated in Phase 5 from `docs/PLAN.md`: broader taxpayer coverage, CA workspace depth, analytics, retention/revocation, notice/refund flows, and production hardening.
 
@@ -80,20 +86,19 @@ The strongest areas are:
 - selector-drift telemetry, replay-harness scaffolding, and lightweight analytics;
 - a narrow deterministic rules-core and shared schema/DSL packages.
 
-The weakest areas are:
+The weakest areas are now:
 
-- durable persistence and real thread resume behavior;
 - real document upload, parsing, normalization, and evidence persistence;
 - page adapters and DOM schemas for the portal;
-- production auth, consent, retention, and anti-phishing behavior;
-- end-to-end browser execution and read-after-write validation;
+- broader parser coverage, reviewer workflows, and post-filing features;
+- deeper CA workspace tooling, richer analytics, and inline field evidence;
 - automated tests and CI enforcement.
 
 Bottom line:
 
-- No phase in `docs/PLAN.md` meets its documented exit criteria.
-- The 30-point "Executed" plan substantially overstates completion.
-- Under strict end-to-end criteria, no documented use case is fully complete yet.
+- Phase 2-4 core assisted filing is implemented in code with durable persistence.
+- Several Phase 5 trust/safety items are now also implemented in code.
+- The repository still falls short of full roadmap completion because reviewer workflows, broader taxpayer coverage, post-filing features, and CI depth remain open.
 
 ## Phase-Level Verdict
 
@@ -104,7 +109,7 @@ Bottom line:
 | Phase 2 - Document Intelligence | Implemented-in-code | Postgres-backed documents, storage, queueing, extraction, normalization, evidence persistence, and reconciliation are implemented; broader fixture-bank accuracy gates remain to be expanded. |
 | Phase 3 - Guided Autofill | Implemented-in-code | Durable proposal/approval/execution persistence, live sidepanel approvals, browser execution/readback, and undo are implemented and validated in tests/typecheck. |
 | Phase 4 - Completion Flow | Implemented-in-code | Submission summary, consent ledger, artifact archive, e-verification handoff, and revision branching now have persistence, APIs, and sidepanel flow; live demo-account exit criteria remain unverified. |
-| Phase 5 - Scale And Hardening | Early partial | Replay, drift autopilot, offline export, analytics, and CA API scaffolds exist, but coverage, reviewer workflow, advanced security, and dashboards are incomplete. |
+| Phase 5 - Scale And Hardening | Partial | Replay, drift telemetry, offline export, retention purge, trust boundaries, validation-help, unsupported-flow downgrade, prompt-injection screening, and anomaly quarantine exist; reviewer workflow depth, dashboards, and broader operational hardening remain incomplete. |
 
 ## Exit-Criteria Check
 
@@ -167,86 +172,87 @@ Important caveat: even the scaffold-complete items do not imply phase-exit compl
 
 Strict scoring rule used here:
 
-- Partial means the repo contains some logic or UI toward the use case, but the documented outcome is not yet delivered end to end.
+- Implemented-in-code means the repo contains a durable code path for the use case, with persistence and/or validation, but live-account, production-hardening, or UX-polish criteria may still remain.
+- Partial means the repo contains some logic, UI, or schema support toward the use case, but the documented outcome is not yet delivered end to end.
 - Missing means the documented outcome is not meaningfully implemented.
 
 Summary:
 
-- Covered end to end: 0
-- Partial: 48
-- Missing: 22
+- Implemented-in-code: 18
+- Partial: 43
+- Missing: 9
 
 ### A. Onboarding And Session
 
-1. Partial - Install and activate: MV3 manifest, host restriction, side panel, and chat shell exist, but there is no verified-host badge.
-2. Missing - Device + session binding: auth is a dev-token stub with no device-scoped binding or revocation.
-3. Missing - Consent-first onboarding: no onboarding flow or persisted `consents` ledger exists.
-4. Missing - Resume a paused filing: checkpointer is in-memory only and there is no pause/resume flow or cross-session reload.
+1. Partial - Install and activate: MV3 manifest, host restriction, and side panel are in place, but there is no verified-host badge.
+2. Implemented-in-code - Device + session binding: device-bound login, refresh, revocation, request auth context, and authenticated WebSocket binding are implemented.
+3. Partial - Consent-first onboarding: a `consents` ledger now exists for submit/e-verify approvals, but there is no explicit onboarding or purpose-by-purpose consent-first flow.
+4. Partial - Resume a paused filing: checkpoints are now stored in Postgres and thread IDs can be reloaded, but explicit pause/resume UX and full browser-session restoration are still incomplete.
 
 ### B. Portal Awareness
 
-5. Partial - Explain the current page: explanation node exists for many pages, but page detection is coarse.
-6. Partial - List required inputs for this page: static lists exist, but they are not derived from real page adapters or DOM schemas.
-7. Missing - Translate a portal validation error: errors are surfaced, but not rewritten into a targeted recovery question.
+5. Partial - Explain the current page: explanation node exists for many pages, but page detection is still coarse.
+6. Partial - List required inputs for this page: static adapter schemas exist for many pages, but they are not fully DOM-derived and some pages still have empty schemas.
+7. Implemented-in-code - Translate a portal validation error: validation errors are translated into plain-English recovery guidance and surfaced in the sidepanel.
 8. Partial - Identify the right ITR form: ITR inference exists, but the rule set is narrow and rationale is limited.
-9. Partial - Flag an unsupported flow: some signals like foreign assets exist, but there is no true guided-mode downgrade or CA handoff.
-10. Partial - Anti-phishing guard: host permissions are tight, but there is no verified-host badge, lookalike warning, or redirect suspension in the extension.
+9. Implemented-in-code - Flag an unsupported flow: the backend assesses unsupported/risky cases, downgrades the thread into guided-checklist mode, and can prepare a durable CA handoff package.
+10. Implemented-in-code - Anti-phishing guard: the extension now shows verified/lookalike/unsupported trust state and suspends automation on suspicious or unsupported hosts.
 
 ### C. Document Intake And Extraction
 
-11. Partial - Parse AIS JSON/CSV/PDF: parser files exist, but current parser implementations are stubs.
-12. Partial - Parse TIS: parser exists, but implementation is stubbed.
-13. Partial - Parse Form 16: parser exists, but implementation is stubbed.
-14. Partial - Parse Form 16A: parser exists, but implementation is stubbed.
-15. Partial - Parse salary slips: parser exists, but implementation is stubbed.
-16. Partial - Parse interest certificates: parser exists, but implementation is stubbed.
-17. Partial - Parse rent receipts for HRA: parser exists, but implementation is stubbed and no HRA computation is wired.
-18. Partial - Parse home-loan interest certificate: parser exists, but implementation is stubbed.
-19. Partial - Parse ELSS/PPF/LIC/tuition receipts: `elss_ppf` parser exists, but implementation is stubbed and coverage is incomplete.
-20. Missing - Parse health-insurance receipts: there is no dedicated health-insurance parser.
-21. Partial - Parse broker capital-gains statements: parser exists, but implementation is stubbed.
-22. Partial - OCR fallback on scanned proofs: OCR stage exists, but it is a pass-through stub.
-23. Partial - Reject malicious or unreadable files: sanitize/virus-scan helpers exist, but they are minimal and not tied to a real upload pipeline.
-24. Missing - Multi-version documents: document versioning is not implemented in code.
+11. Partial - Parse AIS JSON/CSV/PDF: parsers exist and feed normalized facts/evidence, but breadth and accuracy are still limited.
+12. Partial - Parse TIS: parser exists, but remains heuristic and lightly validated.
+13. Partial - Parse Form 16: core salary/TDS extraction exists, but full Part A + Part B richness is incomplete.
+14. Partial - Parse Form 16A: TDS-on-other-income extraction exists, but coverage remains narrow.
+15. Partial - Parse salary slips: parser exists, but robust month-by-month reconciliation is incomplete.
+16. Partial - Parse interest certificates: parser exists, but broader institution and layout coverage is still limited.
+17. Partial - Parse rent receipts for HRA: rent/HRA-related extraction exists, but a full HRA rules workflow and audit trail remain incomplete.
+18. Partial - Parse home-loan interest certificate: interest/principal split exists, but schedule-ready completeness is limited.
+19. Partial - Parse ELSS/PPF/LIC/tuition receipts: parser support exists, but the broader family of 80C proofs is still incomplete.
+20. Partial - Parse health-insurance receipts: a dedicated parser exists, but age-based cap handling and edge cases are incomplete.
+21. Partial - Parse broker capital-gains statements: parser exists, but lot-level and schedule-grade handling is incomplete.
+22. Partial - OCR fallback on scanned proofs: OCR fallback runs and records confidence, but remains lightweight.
+23. Partial - Reject malicious or unreadable files: signed upload, virus scan, and sanitization are wired into upload, but controls remain basic.
+24. Implemented-in-code - Multi-version documents: re-uploads create and preserve `document_versions` history.
 
 ### D. Reconciliation And Mismatch Handling
 
 25. Partial - AIS vs Form 16 salary diff: reconciliation exists in generic form, but not as a robust salary-specific flow.
-26. Partial - AIS vs broker statement diff: reconciliation/duplicate modules exist, but no real capital-gains-specific matching logic is implemented.
+26. Partial - AIS vs broker statement diff: reconciliation and duplicate modules exist, but no real capital-gains-specific matching logic is implemented.
 27. Partial - AIS vs bank certificate interest diff: generic mismatch handling exists, but not a real interest-certificate reconciliation workflow.
-28. Partial - Detect likely under-reporting: severity buckets include under-reporting, but logic is simplistic.
-29. Partial - Detect likely AIS prefill issue: severity includes `prefill_issue`, but no evidence-backed override workflow exists.
-30. Partial - Duplicate-proof detection: duplicate helpers exist, but only as trivial exact-match de-duplication.
+28. Partial - Detect likely under-reporting: severity buckets include under-reporting, but logic is still simplistic.
+29. Partial - Detect likely AIS prefill issue: mismatch severity and evidence UI exist, but no full override workflow exists.
+30. Partial - Duplicate-proof detection: duplicate helpers exist, but only as simple heuristic de-duplication.
 
 ### E. Tax Reasoning
 
-31. Partial - Old vs new regime comparison: rules-core compares two numbers, but there is no full recommendation engine tied to complete facts.
+31. Partial - Old vs new regime comparison: regime math exists in the submission flow, but recommendation UX and broader rule completeness are limited.
 32. Partial - Eligibility check for ITR-1: a narrow eligibility helper exists, but not the full pass/fail reason list.
 33. Partial - Required-schedule detection: schedule helper exists, but only covers a few heads.
-34. Partial - Deduction caps: 80C and 80D are present, but 80G, 80TTA, and 80TTB are missing.
+34. Partial - Deduction caps: 80C and 80D are present and some additional fields exist, but full cap coverage including 80TTB remains incomplete.
 35. Partial - Standard deduction applicability: standard deduction exists, but broader salary/pension handling is not integrated end to end.
 36. Partial - Presumptive income eligibility: a minimal ITR-4 helper exists, but 44AD/44ADA reasoning is not implemented.
 37. Partial - Residential-status questionnaire: there is a static question, but no day-count or tie-breaker rule engine.
-38. Partial - Refund or additional-tax estimate: submission-summary code computes refund/payable, but it is not backed by a completed canonical-facts pipeline.
+38. Partial - Refund or additional-tax estimate: submission summary computes refund/payable from normalized facts, but broader rules coverage is still incomplete.
 
 ### F. Filling The Portal
 
-39. Partial - Batched fill plan: fill-plan generation exists, but it is not backed by non-empty adapter schemas or full UI wiring.
-40. Missing - Targeted single-field fill: the approval model includes the concept, but a true one-field flow is not wired.
-41. Partial - Read-after-write: execution records a simulated readback, not a real DOM verification pass.
+39. Partial - Batched fill plan: durable proposal and execution flows exist, but adapter/page coverage is still incomplete.
+40. Implemented-in-code - Targeted single-field fill: proposal generation supports page and field targeting with focused approvals.
+41. Implemented-in-code - Read-after-write: browser execution captures observed post-fill values and persists them.
 42. Partial - Selector-drift recovery: recovery flow and learned mappings exist, but persistence and actual retry execution are incomplete.
-43. Missing - Regime toggle with impact preview: no dedicated regime-switch preview flow exists.
-44. Partial - Bank account update with hard approval gate: generic approval exists, but there is no bank-change-specific gate or special handling.
+43. Implemented-in-code - Regime toggle with impact preview: the backend compares old vs new regime, the sidepanel shows the delta, and a targeted regime-switch proposal can be prepared.
+44. Implemented-in-code - Bank account update with hard approval gate: bank-related fills trigger a dedicated high-risk approval path and are audited.
 45. Partial - Inline evidence on every field: evidence UI exists, but not as a per-filled-portal-field inline traceability flow.
-46. Missing - Undo last fill batch: undo is not implemented.
+46. Implemented-in-code - Undo last fill batch: undo API and sidepanel flow revert the latest fill batch.
 
 ### G. Review, Submission, Verification
 
-47. Partial - Pre-submission summary: a strong summary node exists, but it is not validated against the real portal or durable artifacts.
-48. Partial - Explicit submission consent: consent text and approval hashing exist, but there is no persisted `consents` ledger.
-49. Partial - E-verification handoff: method guidance exists, but the full post-submit flow is not integrated end to end.
-50. Missing - ITR-V + JSON archive: archive node only marks the thread archived; no ITR-V bundle exists.
-51. Partial - Revised return: branch support exists, but the full workflow and data lineage are incomplete.
+47. Implemented-in-code - Pre-submission summary: summary generation, persistence, and sidepanel review flow are implemented.
+48. Implemented-in-code - Explicit submission consent: consent text is hashed and persisted in `consents` for submit/e-verify approvals.
+49. Implemented-in-code - E-verification handoff: method-specific handoff, manual completion tracking, and sidepanel flow are implemented.
+50. Partial - ITR-V + JSON archive: summary, offline JSON, and evidence bundle are archived, but the ITR-V artifact is still a placeholder bundle rather than the official portal-issued file.
+51. Implemented-in-code - Revised return: thread branching, lineage persistence, and sidepanel-triggered revision flow are implemented.
 52. Missing - Updated return (ITR-U) support: not implemented.
 
 ### H. Post-Filing And Multi-Year
@@ -264,12 +270,12 @@ Summary:
 
 ### J. Compliance, Safety, Trust
 
-60. Partial - Action-level audit export: approval/execution metadata exists in memory, but there is no durable audit export pipeline.
-61. Missing - Consent revocation: not implemented.
-62. Missing - Retention-driven purge: not implemented.
+60. Partial - Action-level audit export: action and filing audit data are durably written, but there is no dedicated export packaging flow yet.
+61. Implemented-in-code - Consent revocation: consents can be revoked and the purge workflow is queued and surfaced in the UI.
+62. Implemented-in-code - Retention-driven purge: purge jobs delete stored artifacts, replay data, and checkpoint-linked material on schedule or immediate revocation.
 63. Partial - PII-redacted logs: redaction helpers exist, but storage discipline is not enforced end to end.
-64. Partial - Anomaly blocking: anomalies are detected and exposed, but threads are not auto-paused/quarantined.
-65. Missing - Prompt-injection defense in documents: the safety rule is documented, but not enforced in code.
+64. Implemented-in-code - Anomaly blocking: anomaly headers now trigger thread quarantine, automation APIs reject quarantined work, and the sidepanel exposes explicit resume-after-review control.
+65. Implemented-in-code - Prompt-injection defense in documents: text uploads are scanned for prompt-like control content, high-risk documents are blocked before extraction, and risky cases feed the support assessment.
 
 ### K. Developer And Operability
 
@@ -277,146 +283,109 @@ Summary:
 67. Missing - Adapter hot-swap: not implemented.
 68. Partial - Rule-version pinning: version fields exist in places, but real version pinning and replay fidelity are incomplete.
 69. Partial - Synthetic persona fixtures: several personas and synthetic-doc generators exist, but not the planned 50+ regression-grade fixture bank.
-70. Missing - Extraction-accuracy dashboards: analytics exist, but not parser/doc-type accuracy dashboards.
+70. Missing - Extraction-accuracy dashboards: generic analytics exist, but not parser/doc-type accuracy dashboards.
 
-## Missing Implementation Inventory
+## Current Pending Implementation Inventory
 
-This section consolidates what is still missing from the repo into implementation-level gaps.
+This section consolidates what is still genuinely pending after the recent Phase 2-4 implementation work.
 
-### 1. Runtime Persistence And State
+### 1. Auth, Session, And Trust Boundaries
 
-- Postgres-backed checkpoint storage.
-- True pause/resume thread lifecycle.
-- Persistent browser-session and portal-session state.
-- Durable thread history and replay metadata.
+- Device-bound auth, refresh, revocation, and browser-session binding.
+- Consent-first onboarding UX for upload/fill/regime-compare/reviewer-share purposes.
+- Verified-host badge, lookalike-domain detection, and redirect suspension.
+- Stronger extension-side cryptography than the current lightweight storage approach.
 
-### 2. Data Model Realization
+### 2. Portal Awareness And Adapter Depth
 
-- SQLAlchemy or equivalent models for users, devices, sessions, documents, facts, approvals, consents, portal mappings, and artifacts.
-- Migrations beyond the single `filing_audit_trail` bootstrap table.
-- Row-level access rules and durable audit writes.
+- Finish non-empty adapter schemas for all supported pages.
+- Move more detection/schema extraction away from title/URL heuristics and toward DOM-driven logic.
+- Translate portal validation errors into targeted recovery guidance.
+- Add explicit unsupported-flow downgrade and CA handoff behavior.
 
-### 3. Auth, Consent, And Security
+### 3. Document Intelligence Quality
 
-- Device binding and token refresh/revocation.
-- Persisted consent ledger with revoke flows.
-- Retention/purge jobs.
-- Real cryptography for extension session data.
-- Verified-host badge, anti-phishing banner, and redirect suspension.
-- Stronger anomaly response than header annotation.
+- Broaden and harden parser coverage for TIS, salary slips, rent receipts, home-loan certificates, ELSS/PPF proofs, and broker statements.
+- Improve OCR quality beyond the current lightweight fallback.
+- Expand age-based and edge-case deduction handling, especially around 80D and richer deduction families.
+- Raise parser accuracy with a larger validated fixture bank.
 
-### 4. Portal Understanding
+### 4. Rules And Reasoning Breadth
 
-- Registry wiring for all page adapters.
-- Real `getFormSchema` results for every supported page.
-- Rich DOM-driven page detection instead of title-only heuristics.
-- Validation-error translation into user-actionable guidance.
-- Selector snapshot tests for each adapter.
+- Expand ITR eligibility, required-schedule detection, residential-status rules, deduction caps, and presumptive-taxation support.
+- Add regime-switch impact preview UX before committing changes.
+- Improve disclosure checks and unsupported-case escalation coverage.
 
-### 5. Document Pipeline
+### 5. Browser Execution Hardening
 
-- Real signed-upload flow to object storage.
-- Queue-backed worker orchestration.
-- Real text extraction, table extraction, and OCR fallback.
-- Non-stub parsers for AIS/TIS/Form16/Form16A/salary slips/interest certificates/rent receipts/home-loan certificates/ELSS-PPF proofs/health-insurance receipts/broker statements.
-- Document versioning.
+- Persist selector retraining in a way that meaningfully survives portal drift.
+- Improve adapter coverage so batched fills work across more real portal pages.
+- Surface evidence inline against filled fields, not only in the sidepanel.
+- Package action-level audit data into a downloadable export.
 
-### 6. Canonical Facts And Evidence
+### 6. Filing And Post-Filing Completion
 
-- Normalization of parser output strictly into `packages/tax-schema`.
-- Evidence pointer persistence for every fact.
-- Extractor-version and rule-version persistence per fact.
-- Better tax-schema coverage for capital gains, house property, other sources, tax paid, approvals, evidence, and artifacts.
+- Replace the placeholder ITR-V archive with the official portal-issued artifact when available.
+- Add ITR-U support.
+- Add year-over-year comparison, next-AY readiness, notice-response prep, and refund-status tracking.
 
-### 7. Reconciliation And Rules
+### 7. CA / Reviewer Workspace
 
-- Real AIS-vs-doc reconciliation logic by document type.
-- Duplicate-trade and duplicate-proof detection.
-- Broader mismatch severity logic.
-- Deduction caps beyond 80C/80D.
-- Residential-status computation.
-- Schedule detection and disclosure checks for more flows.
-- Presumptive-taxation rules.
+- Build an actual reviewer dashboard UI on top of the current list/detail APIs.
+- Add reviewer sign-off, dual-approval, and client counter-consent.
+- Add bulk export for clients.
 
-### 8. Browser Execution And Audit
+### 8. Compliance, Retention, And Security Response
 
-- Backend-to-extension action dispatch bound to the correct tax-portal tab.
-- Real single-field and batched fill flows.
-- Actual read-after-write verification.
-- Undo-last-batch where portal behavior allows it.
-- Special approval flows for regime changes and bank-account changes.
-- Durable action-level audit export.
+- Consent revocation flow using the existing schema support.
+- Retention-driven purge of uploads and raw artifacts.
+- Stronger anomaly response than passive observation.
+- Real document prompt-injection defenses instead of minimal sanitization.
 
-### 9. Submission And Post-Filing
+### 9. Testing, Analytics, And Operability
 
-- Artifact archive: ITR-V, evidence bundle, JSON export.
-- Updated return (ITR-U) support.
-- Year-over-year comparison.
-- Readiness checklist for next AY.
-- Notice-response explainer.
-- Refund-status tracking.
+- Expand backend, worker, and extension automated tests.
+- Add richer replay coverage tied to stored checkpoints and DOM snapshots.
+- Add extraction-accuracy dashboards by document type and parser version.
+- Strengthen CI quality gates so failing lint/test paths cannot be masked.
 
-### 10. CA Workspace And Review Flow
+## Recommended Remaining Implementation Plan
 
-- Actual reviewer dashboard UI.
-- Reviewer sign-off and client counter-consent.
-- Bulk export for clients.
+This plan focuses only on the work that remains after the current Phase 2-4 implementation.
 
-### 11. Testing, CI, And Operability
-
-- Backend unit tests.
-- Worker tests.
-- Extension tests.
-- Playwright scenarios, not just config.
-- Adapter snapshot tests.
-- Persona-driven end-to-end replay coverage.
-- CI without `|| true` masking.
-- Installed dependency/toolchain path for local and CI runs.
-- Extraction-accuracy dashboards.
-
-## Recommended 30-Point Implementation Plan
-
-This plan replaces the current optimistic "Executed" interpretation with an implementation sequence aimed at actually closing the documented gaps.
-
-1. Reclassify `docs/IMPLEMENTATION_30_POINT_PLAN.md` so it no longer marks scaffold-only work as done.
-2. Make CI a real quality gate: install dependencies, run build/lint/typecheck/test without `|| true`, and fail on red.
-3. Add backend unit tests for core agent nodes, APIs, and security helpers.
-4. Add worker tests for parsers, normalization, and reconciliation.
-5. Add extension tests for page detection, action execution, and side panel state flow.
-6. Replace the in-memory checkpointer with a Postgres-backed checkpoint store.
-7. Implement pause, resume, and thread-history APIs on top of durable checkpoints.
-8. Expand the real database schema to cover users, devices, browser sessions, portal sessions, documents, facts, approvals, consents, portal mappings, and artifacts.
-9. Build actual auth with device binding, refresh tokens, revocation, and session metadata.
-10. Implement a real consent service with purpose-specific grants, revocation, and purge-job enqueueing.
-11. Replace extension base64 storage with real WebCrypto-based wrapping for session data.
-12. Add verified-host UI, anti-phishing banners, and redirect suspension behavior in the extension.
-13. Register all supported page adapters in `packages/portal-adapters` and remove the current title-only dependence.
-14. Implement non-empty `getFormSchema` and real validation readers for every supported page adapter.
-15. Add adapter snapshot tests for dashboard, start filing, ITR selection, personal info, salary, deductions, tax paid, bank, regime, summary, capital gains, house property, and e-verify.
-16. Implement the real signed-upload flow, document metadata persistence, and storage keys.
-17. Wire backend document intake to a real worker queue instead of pass-through stubs.
-18. Implement text extraction, table extraction, and OCR fallback with confidence capture.
-19. Replace every parser stub with typed extraction for AIS JSON, AIS CSV, AIS PDF, TIS, Form 16, Form 16A, salary slips, interest certificates, rent receipts, home-loan certificates, ELSS-PPF proofs, health-insurance receipts, and broker capital-gains statements.
-20. Normalize all parser output strictly into `packages/tax-schema` and reject free-form fact shapes.
-21. Persist evidence pointers, extractor versions, rule versions, and document-version history for every fact.
-22. Implement real AIS-vs-doc reconciliation, mismatch severity, duplicate detection, and targeted follow-up questions.
-23. Expand `packages/rules-core` for ITR eligibility, residential-status rules, deduction caps, presumptive taxation, schedule detection, and disclosure checks.
-24. Expand `packages/tax-schema` for capital gains, house property, other sources, tax paid, evidence, approvals, and submission artifacts.
-25. Rebuild fill-plan generation on top of real adapter schemas and evidence confidence rather than static field maps alone.
-26. Wire backend-approved actions to the extension so fills happen on the bound portal tab, with real read-after-write verification.
-27. Add selector-drift learning persistence, retry execution, and undo-last-batch support where the portal permits it.
-28. Implement special approvals for bank-account changes, regime switches, draft save, submit, and e-verify handoff, and write them durably to audit storage.
-29. Finish submission/post-filing flows: ITR-V generation, evidence bundle archive, offline JSON export validation, revised-return polishing, and ITR-U gating.
-30. Build the CA workspace, persona-driven replay suite, extraction-accuracy dashboards, and nightly drift-autopilot loop so the system can be operated and improved safely.
+1. Replace the dev-token auth stub with device-bound auth, refresh, and revocation.
+2. Add a consent-first onboarding flow for upload, fill, regime-compare, and reviewer-share purposes.
+3. Add verified-host UI, lookalike-domain warnings, and redirect suspension in the extension.
+4. Complete adapter schemas for all supported pages and remove remaining empty schemas.
+5. Make page detection and required-input discovery more DOM-driven and less title/URL-dependent.
+6. Translate portal validation errors into actionable recovery guidance.
+7. Broaden parser coverage and accuracy for TIS, salary slips, rent receipts, home-loan certificates, ELSS/PPF proofs, and broker statements.
+8. Improve OCR quality and validation coverage in the document pipeline.
+9. Expand rules-core for residential status, richer deduction caps, fuller ITR eligibility, and presumptive-taxation reasoning.
+10. Add regime-switch impact preview before the user approves a change.
+11. Harden selector-drift recovery and persist learned mappings in an operationally useful way.
+12. Add inline evidence traceability on filled portal fields.
+13. Replace the placeholder ITR-V archive with the official filed artifact where available.
+14. Implement ITR-U support with explicit escalation gates.
+15. Add year-over-year comparison, next-AY readiness, notice-response prep, and refund-status tracking.
+16. Build a real CA/reviewer dashboard UI.
+17. Add reviewer sign-off, dual approval, and client counter-consent.
+18. Add bulk export for CA/reviewer workflows.
+19. Implement consent revocation and retention-driven purge jobs.
+20. Strengthen anomaly response from passive detection to active pause/quarantine.
+21. Add meaningful document prompt-injection defenses beyond null-byte stripping.
+22. Expand backend, worker, extension, and replay-based automated tests.
+23. Add extraction-accuracy dashboards by parser version and document type.
+24. Remove remaining CI masking so lint, test, and replay regressions fail fast.
 
 ## Practical Conclusion
 
-The project is not empty. It contains a real and useful scaffold, especially in backend orchestration and UI structure.
+The project is no longer just a scaffold.
 
-But it is not yet accurate to say that the plan has been fully implemented or that the documented use cases are comprehensively covered.
+It now has a meaningful implemented-in-code core across document ingestion, guided autofill, and filing completion. But it is still not accurate to say that all documented use cases are covered.
 
 The most accurate description is:
 
-- broad scaffold present;
-- selected core flows partially implemented;
-- major production, compliance, parser, persistence, adapter, and test gaps still open.
+- a solid Phase 2-4 assisted-filing path exists in code;
+- many supporting and Phase 5 use cases are still only partial;
+- production auth, reviewer workflows, post-filing features, retention/revocation, and broader quality hardening remain open.

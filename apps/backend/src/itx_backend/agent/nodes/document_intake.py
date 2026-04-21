@@ -11,6 +11,10 @@ async def run(state: AgentState) -> AgentState:
     rejected = []
 
     for doc in docs:
+        security = doc.get("security", {})
+        if security.get("prompt_injection_risk") == "high":
+            rejected.append({**doc, "reason": "prompt_injection_risk"})
+            continue
         if not doc.get("sanitized", True):
             rejected.append({**doc, "reason": "not_sanitized"})
             continue

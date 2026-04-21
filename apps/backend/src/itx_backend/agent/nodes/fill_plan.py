@@ -107,6 +107,9 @@ FIELD_MAPPINGS = {
         "bank.ifsc": {"selector": "#ifscCode", "label": "IFSC Code"},
         "bank.account_type": {"selector": "#accountType", "label": "Account Type"},
     },
+    "regime-choice": {
+        "regime": {"selector": "select[name='tax_regime'], #taxRegime, input[name='tax_regime']", "label": "Tax Regime"},
+    },
     "tax-paid": {
         "tax_paid.tds_salary": {"selector": "#tdsSalary", "label": "TDS on Salary"},
         "tax_paid.tds_other": {"selector": "#tdsOther", "label": "TDS on Other Income"},

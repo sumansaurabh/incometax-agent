@@ -36,6 +36,14 @@ class LocalDocumentStorage:
     def read(self, storage_uri: str) -> bytes:
         return self._resolve(storage_uri).read_bytes()
 
+    def delete(self, storage_uri: str) -> bool:
+        path = self._resolve(storage_uri)
+        if not path.exists():
+            return False
+        path.unlink()
+        self._prune_empty_parents(path.parent)
+        return True
+
     def _sign(self, document_id: str, version_no: int, expires: int, storage_uri: str) -> str:
         payload = f"{document_id}:{version_no}:{expires}:{storage_uri}".encode("utf-8")
         return hmac.new(self._secret, payload, sha256).hexdigest()
@@ -46,6 +54,16 @@ class LocalDocumentStorage:
         if root not in candidate.parents and candidate != root:
             raise ValueError("invalid_storage_uri")
         return candidate
+
+    def _prune_empty_parents(self, candidate: Path) -> None:
+        root = self._root.resolve()
+        current = candidate.resolve()
+        while current != root:
+            try:
+                current.rmdir()
+            except OSError:
+                break
+            current = current.parent
 
 
 document_storage = LocalDocumentStorage(

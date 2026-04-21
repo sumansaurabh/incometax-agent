@@ -17,12 +17,27 @@ from itx_backend.api.documents import (
     upload_document_content,
 )
 from itx_backend.db.session import close_connection_pool, get_pool, init_connection_pool
+from itx_backend.security.request_auth import reset_request_auth, set_request_auth
+from itx_backend.services.auth_runtime import AuthContext
 from itx_backend.services.document_storage import document_storage
 
 
 @unittest.skipUnless(os.getenv("ITX_DATABASE_URL"), "ITX_DATABASE_URL required for Postgres tests")
 class DocumentsApiTest(unittest.IsolatedAsyncioTestCase):
+    def _bind_auth(self, user_id: str) -> None:
+        if hasattr(self, "_auth_token") and self._auth_token is not None:
+            reset_request_auth(self._auth_token)
+        self._auth_token = set_request_auth(
+            AuthContext(
+                user_id=user_id,
+                email=f"{user_id}@example.com",
+                device_id=f"device-{user_id}",
+                session_id=f"session-{user_id}",
+            )
+        )
+
     async def asyncSetUp(self) -> None:
+        self._auth_token = None
         self.storage_dir = tempfile.TemporaryDirectory()
         document_storage._root = Path(self.storage_dir.name)
         await close_connection_pool()
@@ -40,10 +55,13 @@ class DocumentsApiTest(unittest.IsolatedAsyncioTestCase):
             await connection.execute(
                 "truncate table document_jobs, document_pages, document_tables, document_entities, document_extractions, document_versions, documents, agent_checkpoints cascade"
             )
+        if self._auth_token is not None:
+            reset_request_auth(self._auth_token)
         await close_connection_pool()
         self.storage_dir.cleanup()
 
     async def test_signed_upload_content_processes_and_attaches_to_thread(self) -> None:
+        self._bind_auth("user-1")
         created = await signed_upload(
             UploadInitRequest(
                 file_name="form16.txt",
@@ -86,6 +104,7 @@ class DocumentsApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(latest_state.tax_facts["tax_paid"]["tds_salary"], 210000.0)
 
     async def test_reupload_creates_new_version_and_reconciles_ais_vs_form16(self) -> None:
+        self._bind_auth("user-1")
         form16 = await signed_upload(
             UploadInitRequest(
                 file_name="form16.txt",

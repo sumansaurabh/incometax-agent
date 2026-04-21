@@ -9,7 +9,11 @@ from pydantic import BaseModel
 from itx_backend.agent.checkpointer import checkpointer
 from itx_backend.agent.nodes import approval_gate, archive, everify_handoff, revised_return, submission_summary
 from itx_backend.agent.state import AgentState
+from itx_backend.security.quarantine import ensure_thread_not_quarantined
+from itx_backend.security.request_auth import get_request_auth, require_thread_state
 from itx_backend.services.filing_runtime import filing_runtime
+from itx_backend.services.regime_advisor import compare_regimes
+from itx_backend.services.retention import retention_service
 
 router = APIRouter(prefix="/api/filing", tags=["filing"])
 
@@ -55,6 +59,17 @@ class RevisionCreateRequest(BaseModel):
     revision_number: int = 1
 
 
+class ConsentRevokeRequest(BaseModel):
+    thread_id: str
+    consent_id: str
+    reason: str = "user_revoked_consent"
+    process_immediately: bool = True
+
+
+class RegimePreviewRequest(BaseModel):
+    thread_id: str
+
+
 def _require_state(state: Optional[AgentState]) -> AgentState:
     if not state:
         raise HTTPException(status_code=404, detail="thread_not_found")
@@ -89,7 +104,7 @@ async def _refresh_submission_summary(state: AgentState, *, is_final: bool) -> t
 
 @router.post("/summary")
 async def generate_summary(payload: FilingSummaryRequest) -> dict[str, Any]:
-    state = _require_state(await checkpointer.latest(payload.thread_id))
+    state = await require_thread_state(payload.thread_id)
     state, summary_record = await _refresh_submission_summary(state, is_final=payload.is_final)
     return {
         "thread_id": payload.thread_id,
@@ -102,7 +117,8 @@ async def generate_summary(payload: FilingSummaryRequest) -> dict[str, Any]:
 
 @router.post("/submit/prepare")
 async def prepare_submit(payload: SubmitPrepareRequest) -> dict[str, Any]:
-    state = _require_state(await checkpointer.latest(payload.thread_id))
+    state = await require_thread_state(payload.thread_id)
+    ensure_thread_not_quarantined(state, "prepare_submit")
     if not state.submission_summary or not state.pending_submission:
         state, _ = await _refresh_submission_summary(state, is_final=payload.is_final)
 
@@ -124,7 +140,8 @@ async def prepare_submit(payload: SubmitPrepareRequest) -> dict[str, Any]:
 
 @router.post("/submit/complete")
 async def complete_submit(payload: CompleteSubmissionRequest) -> dict[str, Any]:
-    state = _require_state(await checkpointer.latest(payload.thread_id))
+    state = await require_thread_state(payload.thread_id)
+    ensure_thread_not_quarantined(state, "complete_submit")
     if not await filing_runtime.has_approved_kind(thread_id=payload.thread_id, kinds=["submit_final", "submit_draft"]):
         raise HTTPException(status_code=409, detail="submission_approval_required")
     if not state.submission_summary:
@@ -158,7 +175,8 @@ async def complete_submit(payload: CompleteSubmissionRequest) -> dict[str, Any]:
 
 @router.post("/everify/prepare")
 async def prepare_everify(payload: EVerifyPrepareRequest) -> dict[str, Any]:
-    state = _require_state(await checkpointer.latest(payload.thread_id))
+    state = await require_thread_state(payload.thread_id)
+    ensure_thread_not_quarantined(state, "prepare_everify")
     if state.submission_status != "submitted":
         raise HTTPException(status_code=409, detail="submission_must_be_completed_first")
 
@@ -177,7 +195,8 @@ async def prepare_everify(payload: EVerifyPrepareRequest) -> dict[str, Any]:
 
 @router.post("/everify/start")
 async def start_everify(payload: EVerifyStartRequest) -> dict[str, Any]:
-    state = _require_state(await checkpointer.latest(payload.thread_id))
+    state = await require_thread_state(payload.thread_id)
+    ensure_thread_not_quarantined(state, "start_everify")
     if not await filing_runtime.has_approved_kind(thread_id=payload.thread_id, kinds=["everify"]):
         raise HTTPException(status_code=409, detail="everify_approval_required")
 
@@ -207,7 +226,8 @@ async def start_everify(payload: EVerifyStartRequest) -> dict[str, Any]:
 
 @router.post("/everify/complete")
 async def complete_everify(payload: EVerifyCompleteRequest) -> dict[str, Any]:
-    state = _require_state(await checkpointer.latest(payload.thread_id))
+    state = await require_thread_state(payload.thread_id)
+    ensure_thread_not_quarantined(state, "complete_everify")
     assessment_year = state.submission_summary.get("assessment_year", state.tax_facts.get("assessment_year", "2025-26"))
     try:
         everify_record = await filing_runtime.complete_everification(
@@ -238,7 +258,7 @@ async def complete_everify(payload: EVerifyCompleteRequest) -> dict[str, Any]:
 
 @router.post("/revision")
 async def create_revision(payload: RevisionCreateRequest) -> dict[str, Any]:
-    base_state = _require_state(await checkpointer.latest(payload.thread_id))
+    base_state = await require_thread_state(payload.thread_id)
     prior_return = {
         "thread_id": base_state.thread_id,
         "tax_facts": base_state.tax_facts,
@@ -299,9 +319,37 @@ async def create_revision(payload: RevisionCreateRequest) -> dict[str, Any]:
     }
 
 
+@router.post("/consents/revoke")
+async def revoke_consent(payload: ConsentRevokeRequest) -> dict[str, Any]:
+    await require_thread_state(payload.thread_id)
+    auth = get_request_auth(required=True)
+    try:
+        revoked = await retention_service.revoke_consent_and_queue_purge(
+            consent_id=payload.consent_id,
+            thread_id=payload.thread_id,
+            requested_by=auth.user_id,
+            reason=payload.reason,
+            process_immediately=payload.process_immediately,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="consent_not_found") from exc
+    return revoked
+
+
+@router.post("/regime-preview")
+async def regime_preview(payload: RegimePreviewRequest) -> dict[str, Any]:
+    state = await require_thread_state(payload.thread_id)
+    if not state.tax_facts:
+        raise HTTPException(status_code=409, detail="tax_facts_required")
+    return {
+        "thread_id": payload.thread_id,
+        **compare_regimes(state.tax_facts),
+    }
+
+
 @router.get("/{thread_id}")
 async def filing_state(thread_id: str) -> dict[str, Any]:
-    state = _require_state(await checkpointer.latest(thread_id))
+    state = await require_thread_state(thread_id)
     return {
         "thread_id": thread_id,
         "submission_status": state.submission_status,
@@ -313,6 +361,7 @@ async def filing_state(thread_id: str) -> dict[str, Any]:
         "summary_record": await filing_runtime.latest_submission_summary(thread_id),
         "everification": await filing_runtime.latest_everification(thread_id),
         "consents": await filing_runtime.list_consents(thread_id),
+        "purge_jobs": await retention_service.list_purge_jobs(thread_id),
         "revision": await filing_runtime.latest_revision(thread_id),
         "archived": state.archived,
     }
@@ -320,6 +369,7 @@ async def filing_state(thread_id: str) -> dict[str, Any]:
 
 @router.get("/{thread_id}/artifacts/{artifact_name}")
 async def download_artifact(thread_id: str, artifact_name: str) -> Response:
+    await require_thread_state(thread_id)
     artifacts = await filing_runtime.latest_artifacts(thread_id)
     if not artifacts:
         raise HTTPException(status_code=404, detail="filed_artifacts_not_found")

@@ -10,6 +10,7 @@ from itx_backend.agent.state import AgentState
 from itx_backend.api.actions import ActionDecision, decision
 from itx_backend.api.filing import (
     CompleteSubmissionRequest,
+    ConsentRevokeRequest,
     EVerifyCompleteRequest,
     EVerifyPrepareRequest,
     EVerifyStartRequest,
@@ -23,15 +24,33 @@ from itx_backend.api.filing import (
     generate_summary,
     prepare_everify,
     prepare_submit,
+    regime_preview,
+    RegimePreviewRequest,
+    revoke_consent,
     start_everify,
 )
 from itx_backend.db.session import close_connection_pool, get_pool, init_connection_pool
+from itx_backend.security.request_auth import reset_request_auth, set_request_auth
 from itx_backend.services.document_storage import document_storage
+from itx_backend.services.auth_runtime import AuthContext
 
 
 @unittest.skipUnless(os.getenv("ITX_DATABASE_URL"), "ITX_DATABASE_URL required for Postgres tests")
 class FilingApiTest(unittest.IsolatedAsyncioTestCase):
+    def _bind_auth(self, user_id: str) -> None:
+        if hasattr(self, "_auth_token") and self._auth_token is not None:
+            reset_request_auth(self._auth_token)
+        self._auth_token = set_request_auth(
+            AuthContext(
+                user_id=user_id,
+                email=f"{user_id}@example.com",
+                device_id=f"device-{user_id}",
+                session_id=f"session-{user_id}",
+            )
+        )
+
     async def asyncSetUp(self) -> None:
+        self._auth_token = None
         self.storage_dir = tempfile.TemporaryDirectory()
         document_storage._root = Path(self.storage_dir.name)
         await close_connection_pool()
@@ -46,12 +65,15 @@ class FilingApiTest(unittest.IsolatedAsyncioTestCase):
         pool = await get_pool()
         async with pool.acquire() as connection:
             await connection.execute(
-                "truncate table revision_threads, filed_return_artifacts, everification_status, submission_summaries, draft_returns, consents, approvals, action_proposals, action_executions, field_fill_history, validation_errors, filing_audit_trail, agent_checkpoints cascade"
+                "truncate table purge_jobs, revision_threads, filed_return_artifacts, everification_status, submission_summaries, draft_returns, consents, approvals, action_proposals, action_executions, field_fill_history, validation_errors, filing_audit_trail, agent_checkpoints cascade"
             )
+        if self._auth_token is not None:
+            reset_request_auth(self._auth_token)
         await close_connection_pool()
         self.storage_dir.cleanup()
 
     async def test_summary_submit_and_everify_flow_persists_artifacts(self) -> None:
+        self._bind_auth("user-1")
         await checkpointer.save(
             AgentState(
                 thread_id="thread-filing-1",
@@ -124,7 +146,17 @@ class FilingApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(artifact_count, 1)
         self.assertEqual(consent_count, 2)
 
+        revoked = await revoke_consent(
+            ConsentRevokeRequest(
+                thread_id="thread-filing-1",
+                consent_id=filing["consents"][0]["consent_id"],
+            )
+        )
+        self.assertEqual(revoked["purge_job"]["status"], "completed")
+        self.assertEqual(await checkpointer.latest("thread-filing-1"), None)
+
     async def test_revision_creates_new_thread_record(self) -> None:
+        self._bind_auth("user-2")
         await checkpointer.save(
             AgentState(
                 thread_id="thread-filing-2",
@@ -163,3 +195,27 @@ class FilingApiTest(unittest.IsolatedAsyncioTestCase):
         async with pool.acquire() as connection:
             revision_count = await connection.fetchval("select count(*) from revision_threads where base_thread_id = $1", "thread-filing-2")
         self.assertEqual(revision_count, 1)
+
+    async def test_regime_preview_recommends_better_outcome(self) -> None:
+        self._bind_auth("user-3")
+        await checkpointer.save(
+            AgentState(
+                thread_id="thread-filing-3",
+                user_id="user-3",
+                itr_type="ITR-1",
+                tax_facts={
+                    "assessment_year": "2025-26",
+                    "regime": "new",
+                    "salary": {"gross": 950000},
+                    "tax_paid": {"tds_salary": 60000},
+                    "deductions": {"80c": 150000, "80d": 25000},
+                    "exemptions": {"hra": 100000},
+                },
+            )
+        )
+
+        preview = await regime_preview(RegimePreviewRequest(thread_id="thread-filing-3"))
+        self.assertIn(preview["recommended_regime"], {"old", "new"})
+        self.assertIn("old_regime", preview)
+        self.assertIn("new_regime", preview)
+        self.assertIsInstance(preview["rationale"], list)

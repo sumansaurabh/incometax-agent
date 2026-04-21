@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 
 const rootDir = fileURLToPath(new URL(".", import.meta.url));
@@ -38,7 +38,7 @@ function buildManifest() {
   };
 }
 
-function emitExtensionManifest() {
+function emitExtensionManifest(): Plugin {
   return {
     name: "emit-extension-manifest",
     generateBundle() {

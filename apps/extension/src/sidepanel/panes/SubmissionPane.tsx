@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 
-import { EverificationRecord, FilingArtifacts, SubmissionSummaryData } from "../backend";
+import { EverificationRecord, FilingArtifacts, PurgeJob, SubmissionSummaryData } from "../backend";
 
 type Props = {
   submissionStatus: string;
@@ -12,6 +12,8 @@ type Props = {
   submitApprovalApproved: boolean;
   everifyApprovalApproved: boolean;
   nextRevisionNumber: number;
+  consents: Array<Record<string, unknown>>;
+  purgeJobs: PurgeJob[];
   onGenerateSummary: () => void;
   onPrepareSubmit: () => void;
   onCompleteSubmission: (ackNo: string, portalRef: string) => void;
@@ -19,7 +21,8 @@ type Props = {
   onStartEVerify: (method: string) => void;
   onCompleteEVerify: (portalRef: string) => void;
   onCreateRevision: (reason: string) => void;
-  getArtifactUrl: (artifactName: "itr-v" | "offline-json" | "evidence-bundle" | "summary") => string;
+  onRevokeConsent: (consentId: string) => void;
+  onOpenArtifact: (artifactName: "itr-v" | "offline-json" | "evidence-bundle" | "summary") => void;
 };
 
 const EVERIFY_METHODS = [
@@ -49,6 +52,8 @@ export function SubmissionPane({
   submitApprovalApproved,
   everifyApprovalApproved,
   nextRevisionNumber,
+  consents,
+  purgeJobs,
   onGenerateSummary,
   onPrepareSubmit,
   onCompleteSubmission,
@@ -56,7 +61,8 @@ export function SubmissionPane({
   onStartEVerify,
   onCompleteEVerify,
   onCreateRevision,
-  getArtifactUrl,
+  onRevokeConsent,
+  onOpenArtifact,
 }: Props): JSX.Element {
   const [ackNo, setAckNo] = useState(artifacts?.ack_no ?? "");
   const [portalRef, setPortalRef] = useState(everification?.portal_ref ?? "");
@@ -128,10 +134,10 @@ export function SubmissionPane({
             <li>Ack No: {artifacts.ack_no ?? "not provided"}</li>
             <li>Filed at: {artifacts.filed_at ?? "pending"}</li>
           </ul>
-          <p><a href={getArtifactUrl("summary")} target="_blank" rel="noreferrer">Download summary</a></p>
-          <p><a href={getArtifactUrl("offline-json")} target="_blank" rel="noreferrer">Download offline JSON</a></p>
-          <p><a href={getArtifactUrl("evidence-bundle")} target="_blank" rel="noreferrer">Download evidence bundle</a></p>
-          <p><a href={getArtifactUrl("itr-v")} target="_blank" rel="noreferrer">Download archived ITR-V bundle</a></p>
+          <p><button disabled={isBusy} onClick={() => onOpenArtifact("summary")}>Download summary</button></p>
+          <p><button disabled={isBusy} onClick={() => onOpenArtifact("offline-json")}>Download offline JSON</button></p>
+          <p><button disabled={isBusy} onClick={() => onOpenArtifact("evidence-bundle")}>Download evidence bundle</button></p>
+          <p><button disabled={isBusy} onClick={() => onOpenArtifact("itr-v")}>Download archived ITR-V bundle</button></p>
         </div>
       ) : null}
 
@@ -168,6 +174,39 @@ export function SubmissionPane({
         <button disabled={isBusy || !revisionReason.trim()} onClick={() => onCreateRevision(revisionReason)}>
           Create Revision Branch #{nextRevisionNumber}
         </button>
+      </div>
+
+      <div>
+        <h4>Consents</h4>
+        {consents.length === 0 ? <p>No persisted consents yet.</p> : null}
+        <ul>
+          {consents.map((consent) => {
+            const consentId = String(consent.consent_id ?? consent.id ?? "");
+            const revokedAt = consent.revoked_at ? String(consent.revoked_at) : null;
+            return (
+              <li key={consentId}>
+                {String(consent.purpose ?? "unknown")} / {revokedAt ? `revoked ${revokedAt}` : "active"}
+                {!revokedAt ? (
+                  <button disabled={isBusy} onClick={() => onRevokeConsent(consentId)}>
+                    Revoke and purge
+                  </button>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+
+      <div>
+        <h4>Purge Jobs</h4>
+        {purgeJobs.length === 0 ? <p>No purge jobs queued.</p> : null}
+        <ul>
+          {purgeJobs.map((job) => (
+            <li key={job.job_id}>
+              {job.reason} / {job.status}
+            </li>
+          ))}
+        </ul>
       </div>
 
       {archived ? <p>Thread archived after verification.</p> : null}

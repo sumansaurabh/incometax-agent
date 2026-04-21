@@ -1,15 +1,13 @@
 from fastapi import APIRouter
 
-from itx_backend.agent.checkpointer import checkpointer
+from itx_backend.security.request_auth import require_thread_state
 
 router = APIRouter(prefix="/api/tax-facts", tags=["tax-facts"])
 
 
 @router.get("/{thread_id}")
 async def tax_facts(thread_id: str) -> dict[str, object]:
-    state = await checkpointer.latest(thread_id)
-    if not state:
-        return {"error": "thread_not_found"}
+    state = await require_thread_state(thread_id)
     return {
         "thread_id": thread_id,
         "facts": state.tax_facts,

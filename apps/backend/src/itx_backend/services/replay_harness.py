@@ -93,5 +93,11 @@ class ReplayHarness:
     def list_runs(self) -> list[dict[str, Any]]:
         return [asdict(r) for r in self._runs]
 
+    def purge_thread(self, thread_id: str) -> None:
+        snapshot_ids = {snapshot_id for snapshot_id, snapshot in self._snapshots.items() if snapshot.thread_id == thread_id}
+        for snapshot_id in snapshot_ids:
+            self._snapshots.pop(snapshot_id, None)
+        self._runs = [run for run in self._runs if run.snapshot_id not in snapshot_ids]
+
 
 replay_harness = ReplayHarness()

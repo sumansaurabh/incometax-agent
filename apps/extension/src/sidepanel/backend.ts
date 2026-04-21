@@ -1,4 +1,5 @@
-export const BACKEND_BASE_URL = "http://localhost:8000";
+import { AuthSession, ensureFreshAuthSession } from "../shared/auth-session";
+import { BACKEND_BASE_URL } from "../shared/backend-config";
 
 export type DetectedField = {
   key: string;
@@ -156,15 +157,193 @@ export type FilingStateResponse = {
   summary_record: Record<string, unknown> | null;
   everification: EverificationRecord | null;
   consents: Array<Record<string, unknown>>;
+  purge_jobs: Array<Record<string, unknown>>;
   revision: Record<string, unknown> | null;
   archived: boolean;
+};
+
+export type AuthIdentity = {
+  user_id: string;
+  email: string;
+  device_id: string;
+  session_id: string;
+  sessions: Array<Record<string, unknown>>;
+};
+
+export type PurgeJob = {
+  job_id: string;
+  thread_id: string;
+  reason: string;
+  requested_by: string;
+  status: string;
+  requested_at?: string | null;
+  due_at?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  details?: Record<string, unknown>;
+};
+
+export type ValidationHelpItem = {
+  field: string;
+  field_label: string;
+  message: string;
+  plain_english: string;
+  suggested_fix: string;
+  question: string;
+  severity: string;
+  suggested_value?: string | null;
+  page_type: string;
+};
+
+export type RegimeProjection = {
+  regime: string;
+  gross_total_income: number;
+  total_deductions: number;
+  taxable_income: number;
+  net_tax_liability: number;
+  total_tax_paid: number;
+  tax_payable: number;
+  refund_due: number;
+  effective_result: number;
+};
+
+export type RegimePreview = {
+  thread_id: string;
+  current_regime: string;
+  recommended_regime: string;
+  delta_vs_current: number;
+  old_regime: RegimeProjection;
+  new_regime: RegimeProjection;
+  rationale: string[];
+};
+
+export type SupportReason = {
+  code: string;
+  title: string;
+  detail: string;
+  severity: string;
+};
+
+export type ReviewHandoff = {
+  handoff_id: string;
+  thread_id: string;
+  requested_by_user_id: string;
+  support_mode: string;
+  status: string;
+  reason?: string | null;
+  reasons: SupportReason[];
+  checklist: string[];
+  summary: Record<string, unknown>;
+  package_storage_uri?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export type SecurityStatus = {
+  quarantined: boolean;
+  reason?: string | null;
+  requested_by?: string | null;
+  details?: Record<string, unknown>;
+  quarantined_at?: string | null;
+  resumed_at?: string | null;
+  resumed_by?: string | null;
+  resume_note?: string | null;
+};
+
+export type SupportAssessment = {
+  thread_id: string;
+  mode: string;
+  can_autofill: boolean;
+  can_submit: boolean;
+  reason_count: number;
+  reasons: SupportReason[];
+  checklist: string[];
+  blocking_issues: string[];
+  mismatch_count: number;
+  pending_approval_count: number;
+  handoffs: ReviewHandoff[];
+  security_status?: SecurityStatus;
 };
 
 type RequestInitWithJson = RequestInit & {
   body?: string;
 };
 
+async function authenticatedFetch(path: string, auth: AuthSession, init?: RequestInitWithJson): Promise<Response> {
+  return fetch(`${BACKEND_BASE_URL}${path}`, {
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${auth.accessToken}`,
+      "X-ITX-Device-ID": auth.deviceId,
+      ...(init?.headers ?? {}),
+    },
+    ...init,
+  });
+}
+
+function extractThreadId(path: string, body?: string): string | null {
+  const pathMatch =
+    path.match(/^\/api\/actions\/thread\/([^/]+)/)?.[1] ??
+    path.match(/^\/api\/filing\/([^/]+)/)?.[1] ??
+    path.match(/^\/api\/tax-facts\/([^/]+)/)?.[1] ??
+    path.match(/^\/api\/ca\/client\/([^/]+)\/support$/)?.[1] ??
+    path.match(/^\/api\/security\/quarantine\/([^/]+)/)?.[1] ??
+    null;
+  if (pathMatch) {
+    return pathMatch;
+  }
+  if (!body) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(body) as { thread_id?: unknown; threadId?: unknown };
+    if (typeof parsed.thread_id === "string") {
+      return parsed.thread_id;
+    }
+    if (typeof parsed.threadId === "string") {
+      return parsed.threadId;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+async function maybeAutoQuarantine(path: string, init: RequestInitWithJson | undefined, auth: AuthSession, response: Response): Promise<void> {
+  if (response.headers.get("X-Anomaly-Detected") !== "true") {
+    return;
+  }
+  if (path.startsWith("/api/security/quarantine")) {
+    return;
+  }
+  const threadId = extractThreadId(path, init?.body);
+  if (!threadId) {
+    return;
+  }
+  await authenticatedFetch("/api/security/quarantine", auth, {
+    method: "POST",
+    body: JSON.stringify({
+      thread_id: threadId,
+      reason: "anomaly_detected",
+      details: { path },
+    }),
+  }).catch(() => undefined);
+}
+
 async function request<T>(path: string, init?: RequestInitWithJson): Promise<T> {
+  const auth = await ensureFreshAuthSession();
+  const response = await authenticatedFetch(path, auth, init);
+  await maybeAutoQuarantine(path, init, auth, response);
+
+  if (!response.ok) {
+    const errorPayload = (await response.json().catch(() => null)) as { detail?: string; error?: string } | null;
+    throw new Error(errorPayload?.detail ?? errorPayload?.error ?? `Backend request failed: ${response.status}`);
+  }
+
+  return response.json() as Promise<T>;
+}
+
+async function unauthenticatedRequest<T>(path: string, init?: RequestInitWithJson): Promise<T> {
   const response = await fetch(`${BACKEND_BASE_URL}${path}`, {
     headers: {
       "Content-Type": "application/json",
@@ -172,12 +351,53 @@ async function request<T>(path: string, init?: RequestInitWithJson): Promise<T> 
     },
     ...init,
   });
-
   if (!response.ok) {
-    throw new Error(`Backend request failed: ${response.status}`);
+    const errorPayload = (await response.json().catch(() => null)) as { detail?: string; error?: string } | null;
+    throw new Error(errorPayload?.detail ?? errorPayload?.error ?? `Backend request failed: ${response.status}`);
   }
-
   return response.json() as Promise<T>;
+}
+
+export async function loginToBackend(input: {
+  email: string;
+  deviceId: string;
+  deviceName: string;
+}): Promise<AuthSession> {
+  const payload = await unauthenticatedRequest<{
+    user_id: string;
+    email: string;
+    device_id: string;
+    session_id: string;
+    access_token: string;
+    refresh_token: string;
+    access_expires_at: string;
+    refresh_expires_at: string;
+  }>("/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify({
+      email: input.email,
+      device_id: input.deviceId,
+      device_name: input.deviceName,
+    }),
+  });
+  return {
+    userId: payload.user_id,
+    email: payload.email,
+    deviceId: payload.device_id,
+    sessionId: payload.session_id,
+    accessToken: payload.access_token,
+    refreshToken: payload.refresh_token,
+    accessExpiresAt: payload.access_expires_at,
+    refreshExpiresAt: payload.refresh_expires_at,
+  };
+}
+
+export async function fetchCurrentIdentity(): Promise<AuthIdentity> {
+  return request<AuthIdentity>("/api/auth/me");
+}
+
+export async function revokeCurrentSession(): Promise<void> {
+  await request<{ status: string }>("/api/auth/revoke", { method: "POST" });
 }
 
 export async function ensureThread(userId: string, threadId?: string | null): Promise<{ thread_id: string; user_id: string }> {
@@ -199,6 +419,7 @@ export async function createProposal(input: {
   threadId: string;
   pageType?: string | null;
   fieldId?: string | null;
+  targetValue?: unknown;
   portalState?: PortalState | null;
 }): Promise<{ fill_plan: FillPlan | null; pending_approvals: Array<Record<string, unknown>>; action_proposal_id?: string }> {
   return request("/api/actions/proposal", {
@@ -207,7 +428,25 @@ export async function createProposal(input: {
       thread_id: input.threadId,
       page_type: input.pageType ?? null,
       field_id: input.fieldId ?? null,
+      target_value: input.targetValue ?? null,
       portal_state: input.portalState ?? null,
+    }),
+  });
+}
+
+export async function fetchValidationHelp(input: {
+  threadId: string;
+  pageType?: string | null;
+  portalState?: PortalState | null;
+  validationErrors: ValidationError[];
+}): Promise<{ items: ValidationHelpItem[] }> {
+  return request("/api/actions/validation-help", {
+    method: "POST",
+    body: JSON.stringify({
+      thread_id: input.threadId,
+      page_type: input.pageType ?? null,
+      portal_state: input.portalState ?? null,
+      validation_errors: input.validationErrors,
     }),
   });
 }
@@ -398,8 +637,93 @@ export async function createRevisionThread(input: {
   });
 }
 
-export function filingArtifactUrl(threadId: string, artifactName: "itr-v" | "offline-json" | "evidence-bundle" | "summary"): string {
-  return `${BACKEND_BASE_URL}/api/filing/${threadId}/artifacts/${artifactName}`;
+export async function revokeConsent(input: {
+  threadId: string;
+  consentId: string;
+  reason?: string;
+}): Promise<{ consent: Record<string, unknown>; purge_job: PurgeJob }> {
+  return request("/api/filing/consents/revoke", {
+    method: "POST",
+    body: JSON.stringify({
+      thread_id: input.threadId,
+      consent_id: input.consentId,
+      reason: input.reason ?? "user_revoked_consent",
+      process_immediately: true,
+    }),
+  });
+}
+
+export async function fetchRegimePreview(threadId: string): Promise<RegimePreview> {
+  return request("/api/filing/regime-preview", {
+    method: "POST",
+    body: JSON.stringify({ thread_id: threadId }),
+  });
+}
+
+export async function fetchSupportAssessment(threadId: string): Promise<SupportAssessment> {
+  return request(`/api/ca/client/${threadId}/support`);
+}
+
+export async function prepareReviewHandoff(input: {
+  threadId: string;
+  reason?: string;
+}): Promise<ReviewHandoff> {
+  return request("/api/ca/handoffs/prepare", {
+    method: "POST",
+    body: JSON.stringify({
+      thread_id: input.threadId,
+      reason: input.reason ?? "unsupported_or_guided_case",
+    }),
+  });
+}
+
+export async function quarantineThread(input: {
+  threadId: string;
+  reason?: string;
+  details?: Record<string, unknown>;
+}): Promise<{ thread_id: string; security_status: SecurityStatus }> {
+  return request("/api/security/quarantine", {
+    method: "POST",
+    body: JSON.stringify({
+      thread_id: input.threadId,
+      reason: input.reason ?? "manual_quarantine",
+      details: input.details ?? {},
+    }),
+  });
+}
+
+export async function resumeThreadQuarantine(input: {
+  threadId: string;
+  note?: string;
+}): Promise<{ thread_id: string; security_status: SecurityStatus }> {
+  return request(`/api/security/quarantine/${input.threadId}/resume`, {
+    method: "POST",
+    body: JSON.stringify({ note: input.note ?? "user_reviewed_anomaly" }),
+  });
+}
+
+export function filingArtifactUrl(
+  threadId: string,
+  artifactName: "itr-v" | "offline-json" | "evidence-bundle" | "summary",
+  auth: AuthSession,
+): string {
+  const params = new URLSearchParams({
+    access_token: auth.accessToken,
+    device_id: auth.deviceId,
+  });
+  return `${BACKEND_BASE_URL}/api/filing/${threadId}/artifacts/${artifactName}?${params.toString()}`;
+}
+
+export function reviewHandoffPackageUrl(
+  threadId: string,
+  handoffId: string,
+  auth: AuthSession,
+): string {
+  const params = new URLSearchParams({
+    access_token: auth.accessToken,
+    device_id: auth.deviceId,
+  });
+  return `${BACKEND_BASE_URL}/api/ca/handoffs/${threadId}/${handoffId}/package?${params.toString()}`;
 }
 
 export function normalizeApprovalItems(payload: ThreadActionsResponse): ApprovalItem[] {

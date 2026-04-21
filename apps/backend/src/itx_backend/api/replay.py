@@ -4,6 +4,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import Optional
 
+from itx_backend.security.request_auth import require_thread_state
 from itx_backend.services.replay_harness import replay_harness
 
 router = APIRouter(prefix="/api/replay", tags=["replay"])
@@ -24,6 +25,7 @@ class ReplayRequest(BaseModel):
 
 @router.post("/capture")
 async def capture(payload: CaptureSnapshotRequest) -> dict:
+    await require_thread_state(payload.thread_id)
     snapshot = replay_harness.capture_snapshot(
         thread_id=payload.thread_id,
         page_type=payload.page_type,
@@ -51,6 +53,9 @@ async def replay(payload: ReplayRequest) -> dict:
 
 @router.get("/snapshots")
 async def snapshots(thread_id: Optional[str] = None) -> dict:
+    if thread_id is not None:
+        await require_thread_state(thread_id)
+        return {"items": replay_harness.list_snapshots(thread_id=thread_id)}
     return {"items": replay_harness.list_snapshots(thread_id=thread_id)}
 
 

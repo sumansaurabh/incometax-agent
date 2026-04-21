@@ -23,6 +23,10 @@ export async function saveSidepanelSession(session: SidepanelSession): Promise<v
   });
 }
 
+export async function clearSidepanelSession(): Promise<void> {
+  await chrome.storage.session.remove([THREAD_KEY, USER_KEY]);
+}
+
 export function createSidepanelUserId(): string {
   return `extension-${crypto.randomUUID()}`;
 }

@@ -15,6 +15,10 @@ class Settings(BaseModel):
     document_upload_secret: str = os.getenv("ITX_DOCUMENT_UPLOAD_SECRET", "dev-document-upload-secret")
     document_upload_ttl_seconds: int = int(os.getenv("ITX_DOCUMENT_UPLOAD_TTL_SECONDS", "900"))
     document_queue_batch_size: int = int(os.getenv("ITX_DOCUMENT_QUEUE_BATCH_SIZE", "10"))
+    auth_access_ttl_seconds: int = int(os.getenv("ITX_AUTH_ACCESS_TTL_SECONDS", "900"))
+    auth_refresh_ttl_seconds: int = int(os.getenv("ITX_AUTH_REFRESH_TTL_SECONDS", str(30 * 24 * 60 * 60)))
+    retention_purge_days: int = int(os.getenv("ITX_RETENTION_PURGE_DAYS", "30"))
+    retention_sweep_interval_seconds: int = int(os.getenv("ITX_RETENTION_SWEEP_INTERVAL_SECONDS", "300"))
 
 
 settings = Settings()

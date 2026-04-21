@@ -136,7 +136,7 @@ export const pageCatalog: StaticAdapterDefinition[] = [
   {
     key: "regime-choice",
     keywords: ["regime choice", "tax regime", "old regime", "new regime"],
-    schema: schema([["tax_regime", "Tax Regime", true]]),
+    schema: schema([["regime", "Tax Regime", true, "select[name='tax_regime'], #taxRegime, input[name='tax_regime']"]]),
   },
   {
     key: "summary-review",

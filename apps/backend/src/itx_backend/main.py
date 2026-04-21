@@ -23,7 +23,10 @@ from itx_backend.api import (
 from itx_backend.config import settings
 from itx_backend.db.session import close_connection_pool, init_connection_pool
 from itx_backend.security.anomaly import anomaly_detector
+from itx_backend.security.request_auth import reset_request_auth, set_request_auth
 from itx_backend.security.rate_limit import FixedWindowRateLimiter
+from itx_backend.services.auth_runtime import AuthError, auth_runtime
+from itx_backend.services.retention import retention_service
 from itx_backend.telemetry.tracing import setup_tracing
 
 
@@ -53,7 +56,29 @@ def create_app() -> FastAPI:
             key=key,
             action=request.url.path,
         )
-        response = await call_next(request)
+        auth_token = None
+        if request.url.path.startswith("/api/") and not request.url.path.startswith("/api/auth"):
+            authorization = request.headers.get("Authorization")
+            access_token = authorization.removeprefix("Bearer ").strip() if authorization and authorization.startswith("Bearer ") else request.query_params.get("access_token")
+            device_id = request.headers.get("X-ITX-Device-ID") or request.query_params.get("device_id", "")
+            if not access_token:
+                return JSONResponse(content={"error": "authorization_required"}, status_code=401)
+            try:
+                auth_context = await auth_runtime.authenticate_access_token(
+                    access_token,
+                    device_id,
+                )
+                auth_token = set_request_auth(auth_context)
+            except AuthError as exc:
+                return JSONResponse(content={"error": exc.code}, status_code=exc.status_code)
+
+        try:
+            await retention_service.maybe_run_due_purges()
+            response = await call_next(request)
+        finally:
+            if auth_token is not None:
+                reset_request_auth(auth_token)
+
         if anomalies:
             response.headers["X-Anomaly-Detected"] = "true"
         return response

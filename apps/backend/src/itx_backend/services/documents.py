@@ -17,7 +17,7 @@ from itx_backend.services.document_storage import document_storage
 from itx_workers.parsers.common import decode_text_bytes
 from itx_workers.document_pipeline import process_document
 from itx_workers.queue import QueueJob, drain, enqueue
-from itx_workers.security.sanitize import sanitize_text
+from itx_workers.security.sanitize import analyze_text_security, sanitize_text
 from itx_workers.security.virus_scan import scan as virus_scan
 
 
@@ -175,8 +175,10 @@ class DocumentService:
 
         mime_type = str(row["mime"] or "").lower()
         sanitized = True
+        security: dict[str, Any] = {"prompt_injection_risk": "low", "findings": []}
         if mime_type in {"text/plain", "text/csv", "application/json"}:
             decoded = decode_text_bytes(content_bytes)
+            security = analyze_text_security(decoded)
             sanitized_text = sanitize_text(decoded)
             sanitized = sanitized_text == decoded
             content_bytes = sanitized_text.encode("utf-8")
@@ -228,6 +230,7 @@ class DocumentService:
                     "storage_uri": storage_uri,
                     "sanitized": sanitized,
                     "virus_scan": virus_scan_status,
+                    "security": security,
                 },
             )
         )
@@ -241,6 +244,7 @@ class DocumentService:
             "storage_uri": storage_uri,
             "sanitized": sanitized,
             "virus_scan": virus_scan_status,
+            "security": security,
         }
         if process_immediately:
             processed = await self.process_pending_jobs(limit=1, document_id=document_id)
@@ -350,6 +354,14 @@ class DocumentService:
             )
         return [self._serialize_document_row(row, versions_by_document.get(str(row["id"]), [])) for row in rows]
 
+    async def get_document_thread_id(self, document_id: str) -> Optional[str]:
+        pool = await get_pool()
+        async with pool.acquire() as connection:
+            return await connection.fetchval(
+                "select thread_id from documents where id = $1::uuid",
+                document_id,
+            )
+
     async def _attach_to_thread(self, thread_id: str, processed_document: dict[str, Any]) -> Optional[dict[str, Any]]:
         state = await checkpointer.latest(thread_id)
         if state is None:
@@ -389,6 +401,55 @@ class DocumentService:
             raise KeyError(job.document_id)
 
         content_bytes = document_storage.read(storage_uri)
+        security = job.payload.get("security", {"prompt_injection_risk": "low", "findings": []})
+
+        if str(security.get("prompt_injection_risk", "low")).lower() == "high":
+            async with pool.acquire() as connection:
+                await connection.execute(
+                    """
+                    update documents
+                    set status = 'rejected', updated_at = now()
+                    where id = $1
+                    """,
+                    parsed_document_id,
+                )
+
+            processed_document = {
+                "id": str(row["id"]),
+                "name": row["file_name"],
+                "type": row["doc_type"] or "unknown",
+                "mime_type": row["mime"],
+                "storage_uri": storage_uri,
+                "version_no": version_no,
+                "sanitized": bool(job.payload.get("sanitized", True)),
+                "virus_scan": job.payload.get("virus_scan", "clean"),
+                "security": security,
+                "parser": "security-blocked",
+                "parser_confidence": 0.0,
+                "classification_confidence": 0.0,
+                "normalized_fields": {},
+                "entities": [],
+                "extraction_warnings": ["document_blocked_for_prompt_injection_risk"],
+                "sha256": hashlib.sha256(content_bytes).hexdigest(),
+            }
+            attached_summary = None
+            if row["thread_id"]:
+                attached_summary = await self._attach_to_thread(str(row["thread_id"]), processed_document)
+            return {
+                "document_id": str(row["id"]),
+                "thread_id": row["thread_id"],
+                "status": "rejected",
+                "document_type": processed_document["type"],
+                "parser": processed_document["parser"],
+                "classification_confidence": 0.0,
+                "normalized_fields": {},
+                "entities": [],
+                "warnings": processed_document["extraction_warnings"],
+                "security": security,
+                "version_no": version_no,
+                "attached_thread": attached_summary,
+            }
+
         payload = {
             "document_id": str(row["id"]),
             "thread_id": row["thread_id"],
@@ -531,9 +592,9 @@ class DocumentService:
             "mime_type": row["mime"],
             "storage_uri": storage_uri,
             "version_no": version_no,
-            "sanitized": True,
             "sanitized": bool(job.payload.get("sanitized", True)),
             "virus_scan": job.payload.get("virus_scan", "clean"),
+            "security": security,
             "parser": processed.get("parsed", {}).get("parser", "unknown"),
             "parser_confidence": extraction_confidence,
             "classification_confidence": processed.get("classification_confidence", 0),
@@ -557,6 +618,7 @@ class DocumentService:
             "normalized_fields": normalized_fields,
             "entities": entities,
             "warnings": processed_document["extraction_warnings"],
+            "security": security,
             "version_no": version_no,
             "attached_thread": attached_summary,
         }

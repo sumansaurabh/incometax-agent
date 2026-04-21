@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 
 import {
   ApprovalItem,
+  AuthIdentity,
   DetectedField,
   EverificationRecord,
   ExecutionRecord,
@@ -9,23 +10,37 @@ import {
   FillAction,
   FillPlan,
   PageContextPayload,
+  PurgeJob,
+  RegimePreview,
+  SupportAssessment,
   SubmissionSummaryData,
   ValidationError,
+  ValidationHelpItem,
   completeEVerify,
   completeSubmission,
   createProposal,
   createRevisionThread,
   decideApproval,
   ensureThread,
+  fetchCurrentIdentity,
   fetchFilingState,
+  fetchRegimePreview,
+  fetchSupportAssessment,
   fetchTaxFacts,
   fetchThreadActions,
+  fetchValidationHelp,
   filingArtifactUrl,
   generateSubmissionSummary,
+  loginToBackend,
   normalizeApprovalItems,
   prepareEVerifyApproval,
+  prepareReviewHandoff,
   prepareSubmissionApproval,
   recordExecution,
+  reviewHandoffPackageUrl,
+  resumeThreadQuarantine,
+  revokeConsent,
+  revokeCurrentSession,
   startEVerifyHandoff,
   undoExecution,
 } from "./backend";
@@ -34,7 +49,16 @@ import { DetectedDetailsPane } from "./panes/DetectedDetailsPane";
 import { PendingActionsPane } from "./panes/PendingActionsPane";
 import { EvidencePane } from "./panes/EvidencePane";
 import { SubmissionPane } from "./panes/SubmissionPane";
-import { SidepanelSession, createSidepanelUserId, loadSidepanelSession, saveSidepanelSession } from "./session";
+import { SupportPane } from "./panes/SupportPane";
+import { clearSidepanelSession, SidepanelSession, loadSidepanelSession, saveSidepanelSession } from "./session";
+import {
+  AuthSession,
+  clearAuthSession,
+  defaultDeviceName,
+  getOrCreateDeviceId,
+  loadAuthSession,
+  saveAuthSession,
+} from "../shared/auth-session";
 
 type EvidenceSource = {
   documentId: string;
@@ -61,6 +85,14 @@ type RuntimeResponse<T> = {
   ok: boolean;
   payload?: T;
   error?: string;
+};
+
+type TrustStatus = {
+  status: "verified" | "lookalike" | "unsupported" | "missing";
+  host: string | null;
+  url: string | null;
+  canOperate: boolean;
+  message: string;
 };
 
 type ActionBatchPayload = {
@@ -161,6 +193,15 @@ export default function App(): JSX.Element {
   const [pageContext, setPageContext] = useState<PageContextPayload | null>(null);
   const [facts, setFacts] = useState<EvidenceFact[]>([]);
   const [session, setSession] = useState<SidepanelSession | null>(null);
+  const [authSession, setAuthSession] = useState<AuthSession | null>(null);
+  const [identity, setIdentity] = useState<AuthIdentity | null>(null);
+  const [authEmail, setAuthEmail] = useState("");
+  const [trustStatus, setTrustStatus] = useState<TrustStatus | null>(null);
+  const [consents, setConsents] = useState<Array<Record<string, unknown>>>([]);
+  const [purgeJobs, setPurgeJobs] = useState<PurgeJob[]>([]);
+  const [supportAssessment, setSupportAssessment] = useState<SupportAssessment | null>(null);
+  const [validationHelp, setValidationHelp] = useState<ValidationHelpItem[]>([]);
+  const [regimePreview, setRegimePreview] = useState<RegimePreview | null>(null);
   const [fillPlan, setFillPlan] = useState<FillPlan | null>(null);
   const [approvals, setApprovals] = useState<ApprovalItem[]>([]);
   const [approvedActions, setApprovedActions] = useState<string[]>([]);
@@ -175,6 +216,25 @@ export default function App(): JSX.Element {
 
   const appendMessage = (message: string) => {
     setMessages((prev) => [...prev, message]);
+  };
+
+  const resetThreadState = () => {
+    setFillPlan(null);
+    setApprovals([]);
+    setApprovedActions([]);
+    setExecutions([]);
+    setSubmissionSummary(null);
+    setSubmissionStatus("draft");
+    setFilingArtifacts(null);
+    setEverification(null);
+    setIsArchived(false);
+    setNextRevisionNumber(1);
+    setFacts([]);
+    setConsents([]);
+    setPurgeJobs([]);
+    setSupportAssessment(null);
+    setValidationHelp([]);
+    setRegimePreview(null);
   };
 
   const applyPageContext = (context: PageContextPayload) => {
@@ -198,11 +258,52 @@ export default function App(): JSX.Element {
     }
   };
 
+  const refreshTrust = async () => {
+    try {
+      const response = await sendRuntimeMessage<RuntimeResponse<TrustStatus>>({ type: "get_active_tab_trust", payload: {} });
+      if (response.ok && response.payload) {
+        setTrustStatus(response.payload);
+      }
+    } catch {
+      setTrustStatus(null);
+    }
+  };
+
+  const refreshContextualInsights = async (threadId: string, context: PageContextPayload) => {
+    if (context.validationErrors.length > 0) {
+      try {
+        const translated = await fetchValidationHelp({
+          threadId,
+          pageType: context.page,
+          portalState: context.portalState,
+          validationErrors: context.validationErrors,
+        });
+        setValidationHelp(translated.items ?? []);
+      } catch (error: unknown) {
+        appendMessage(`Validation help unavailable: ${error instanceof Error ? error.message : "unknown error"}`);
+      }
+    } else {
+      setValidationHelp([]);
+    }
+
+    if (context.page === "regime-choice") {
+      try {
+        setRegimePreview(await fetchRegimePreview(threadId));
+      } catch (error: unknown) {
+        appendMessage(`Regime preview unavailable: ${error instanceof Error ? error.message : "unknown error"}`);
+        setRegimePreview(null);
+      }
+    } else {
+      setRegimePreview(null);
+    }
+  };
+
   const refreshBackendState = async (threadId: string) => {
-    const [actionsPayload, taxFactsPayload, filingPayload] = await Promise.all([
+    const [actionsPayload, taxFactsPayload, filingPayload, supportPayload] = await Promise.all([
       fetchThreadActions(threadId),
       fetchTaxFacts(threadId),
       fetchFilingState(threadId),
+      fetchSupportAssessment(threadId),
     ]);
     setFillPlan(actionsPayload.fill_plan);
     setApprovals(normalizeApprovalItems(actionsPayload));
@@ -215,21 +316,49 @@ export default function App(): JSX.Element {
     setEverification(filingPayload.everification);
     setIsArchived(Boolean(filingPayload.archived));
     setNextRevisionNumber(Number((filingPayload.revision?.revision_number as number | undefined) ?? 0) + 1);
+    setConsents(filingPayload.consents ?? []);
+    setPurgeJobs((filingPayload.purge_jobs ?? []) as PurgeJob[]);
+    setSupportAssessment(supportPayload);
+  };
+
+  const bootstrapThread = async (userId: string) => {
+    const storedSession = await loadSidepanelSession();
+    const ensured = await ensureThread(userId, storedSession?.threadId ?? null);
+    const nextSession = { threadId: ensured.thread_id, userId: ensured.user_id };
+    await saveSidepanelSession(nextSession);
+    setSession(nextSession);
+    const snapshot = await refreshSnapshot();
+    if (snapshot) {
+      await refreshContextualInsights(nextSession.threadId, snapshot);
+    }
+    await refreshBackendState(nextSession.threadId);
+    appendMessage(`Thread ready: ${nextSession.threadId.slice(0, 8)}`);
   };
 
   const initialize = async () => {
     setIsBusy(true);
     try {
-      const storedSession = await loadSidepanelSession();
-      const userId = storedSession?.userId ?? createSidepanelUserId();
-      const ensured = await ensureThread(userId, storedSession?.threadId ?? null);
-      const nextSession = { threadId: ensured.thread_id, userId: ensured.user_id };
-      await saveSidepanelSession(nextSession);
-      setSession(nextSession);
-      await refreshSnapshot();
-      await refreshBackendState(nextSession.threadId);
-      appendMessage(`Thread ready: ${nextSession.threadId.slice(0, 8)}`);
+      await refreshTrust();
+      const storedAuth = await loadAuthSession();
+      if (!storedAuth) {
+        setAuthSession(null);
+        setIdentity(null);
+        setSession(null);
+        resetThreadState();
+        return;
+      }
+
+      setAuthSession(storedAuth);
+      const me = await fetchCurrentIdentity();
+      setIdentity(me);
+      await bootstrapThread(me.user_id);
     } catch (error: unknown) {
+      await clearAuthSession();
+      await clearSidepanelSession();
+      setAuthSession(null);
+      setIdentity(null);
+      setSession(null);
+      resetThreadState();
       appendMessage(`Initialization failed: ${error instanceof Error ? error.message : "unknown error"}`);
     } finally {
       setIsBusy(false);
@@ -244,6 +373,9 @@ export default function App(): JSX.Element {
       if (msg.type === "page_detected" || msg.type === "page_context") {
         applyPageContext(msg.payload as PageContextPayload);
       }
+      if (msg.type === "trust_status") {
+        setTrustStatus(msg.payload as TrustStatus);
+      }
     };
 
     chrome.runtime.onMessage.addListener(listener);
@@ -251,8 +383,20 @@ export default function App(): JSX.Element {
     return () => chrome.runtime.onMessage.removeListener(listener);
   }, []);
 
+  useEffect(() => {
+    if (!session?.threadId || !pageContext) {
+      return;
+    }
+    void refreshContextualInsights(session.threadId, pageContext);
+  }, [pageContext, session?.threadId]);
+
   const handlePreparePage = async () => {
-    if (!session) {
+    if (!session || !trustStatus?.canOperate) {
+      appendMessage(trustStatus?.message ?? "Open the official portal to prepare a fill plan.");
+      return;
+    }
+    if (supportAssessment && !supportAssessment.can_autofill) {
+      appendMessage(`Assisted autofill is paused: ${supportAssessment.reasons[0]?.title ?? "manual review is required"}.`);
       return;
     }
 
@@ -298,7 +442,14 @@ export default function App(): JSX.Element {
   };
 
   const handleExecute = async () => {
-    if (!session || !fillPlan) {
+    if (!session || !fillPlan || !trustStatus?.canOperate) {
+      if (!trustStatus?.canOperate) {
+        appendMessage(trustStatus?.message ?? "Open the official portal to execute approved actions.");
+      }
+      return;
+    }
+    if (supportAssessment && !supportAssessment.can_autofill) {
+      appendMessage(`Execution is paused: ${supportAssessment.reasons[0]?.title ?? "manual review is required"}.`);
       return;
     }
 
@@ -375,7 +526,10 @@ export default function App(): JSX.Element {
   };
 
   const handleUndo = async () => {
-    if (!session) {
+    if (!session || !trustStatus?.canOperate) {
+      if (!trustStatus?.canOperate) {
+        appendMessage(trustStatus?.message ?? "Open the official portal to undo a fill batch.");
+      }
       return;
     }
 
@@ -454,6 +608,10 @@ export default function App(): JSX.Element {
     if (!session) {
       return;
     }
+    if (supportAssessment && !supportAssessment.can_submit) {
+      appendMessage(`Submission is paused: ${supportAssessment.reasons[0]?.title ?? "resolve the guided checklist first"}.`);
+      return;
+    }
 
     setIsBusy(true);
     try {
@@ -469,6 +627,10 @@ export default function App(): JSX.Element {
 
   const handleCompleteSubmission = async (ackNo: string, portalRef: string) => {
     if (!session) {
+      return;
+    }
+    if (supportAssessment && !supportAssessment.can_submit) {
+      appendMessage(`Submission archive is paused: ${supportAssessment.reasons[0]?.title ?? "resolve the guided checklist first"}.`);
       return;
     }
 
@@ -494,6 +656,10 @@ export default function App(): JSX.Element {
     if (!session) {
       return;
     }
+    if (supportAssessment && !supportAssessment.can_submit) {
+      appendMessage(`E-verification is paused: ${supportAssessment.reasons[0]?.title ?? "resolve the guided checklist first"}.`);
+      return;
+    }
 
     setIsBusy(true);
     try {
@@ -509,6 +675,10 @@ export default function App(): JSX.Element {
 
   const handleStartEVerify = async (method: string) => {
     if (!session) {
+      return;
+    }
+    if (supportAssessment && !supportAssessment.can_submit) {
+      appendMessage(`E-verification handoff is paused: ${supportAssessment.reasons[0]?.title ?? "resolve the guided checklist first"}.`);
       return;
     }
 
@@ -585,6 +755,174 @@ export default function App(): JSX.Element {
     }
   };
 
+  const handleLogin = async () => {
+    if (!authEmail.trim()) {
+      appendMessage("Enter an email address to sign in.");
+      return;
+    }
+
+    setIsBusy(true);
+    try {
+      const nextAuth = await loginToBackend({
+        email: authEmail.trim(),
+        deviceId: await getOrCreateDeviceId(),
+        deviceName: defaultDeviceName(),
+      });
+      await saveAuthSession(nextAuth);
+      setAuthSession(nextAuth);
+      chrome.runtime.sendMessage({ type: "auth_session_updated" });
+      appendMessage(`Signed in as ${nextAuth.email}.`);
+      await initialize();
+    } catch (error: unknown) {
+      appendMessage(`Sign-in failed: ${error instanceof Error ? error.message : "unknown error"}`);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    setIsBusy(true);
+    try {
+      await revokeCurrentSession().catch(() => undefined);
+      await clearAuthSession();
+      await clearSidepanelSession();
+      chrome.runtime.sendMessage({ type: "auth_session_cleared" });
+      setAuthSession(null);
+      setIdentity(null);
+      setSession(null);
+      resetThreadState();
+      appendMessage("Signed out and local session cleared.");
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const handleOpenArtifact = async (artifactName: "itr-v" | "offline-json" | "evidence-bundle" | "summary") => {
+    if (!session) {
+      return;
+    }
+    try {
+      const latestAuth = await loadAuthSession();
+      if (!latestAuth) {
+        throw new Error("Authentication required");
+      }
+      window.open(filingArtifactUrl(session.threadId, artifactName, latestAuth), "_blank", "noopener,noreferrer");
+    } catch (error: unknown) {
+      appendMessage(`Artifact download failed: ${error instanceof Error ? error.message : "unknown error"}`);
+    }
+  };
+
+  const handleRevokeConsent = async (consentId: string) => {
+    if (!session) {
+      return;
+    }
+    setIsBusy(true);
+    try {
+      const result = await revokeConsent({ threadId: session.threadId, consentId });
+      appendMessage(`Consent revoked. Purge job ${result.purge_job.job_id} is ${result.purge_job.status}.`);
+      await clearSidepanelSession();
+      resetThreadState();
+      if (identity) {
+        await bootstrapThread(identity.user_id);
+      }
+    } catch (error: unknown) {
+      appendMessage(`Consent revocation failed: ${error instanceof Error ? error.message : "unknown error"}`);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const handleRefreshRegimePreview = async () => {
+    if (!session) {
+      return;
+    }
+    setIsBusy(true);
+    try {
+      const preview = await fetchRegimePreview(session.threadId);
+      setRegimePreview(preview);
+      appendMessage(`Regime comparison refreshed. Recommended regime: ${preview.recommended_regime}.`);
+    } catch (error: unknown) {
+      appendMessage(`Regime comparison failed: ${error instanceof Error ? error.message : "unknown error"}`);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const handlePrepareRecommendedRegime = async () => {
+    if (!session || !regimePreview) {
+      return;
+    }
+    if (supportAssessment && !supportAssessment.can_autofill) {
+      appendMessage(`Regime switch preparation is paused: ${supportAssessment.reasons[0]?.title ?? "manual review is required"}.`);
+      return;
+    }
+    setIsBusy(true);
+    try {
+      const snapshot = (await refreshSnapshot()) ?? pageContext;
+      const proposal = await createProposal({
+        threadId: session.threadId,
+        pageType: "regime-choice",
+        fieldId: "regime",
+        targetValue: regimePreview.recommended_regime,
+        portalState: snapshot?.portalState ?? pageContext?.portalState ?? null,
+      });
+      setFillPlan(proposal.fill_plan);
+      appendMessage(`Prepared regime switch to ${regimePreview.recommended_regime}. Review the approval card before execution.`);
+      await refreshBackendState(session.threadId);
+    } catch (error: unknown) {
+      appendMessage(`Failed to prepare regime switch: ${error instanceof Error ? error.message : "unknown error"}`);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const handlePrepareReviewHandoff = async () => {
+    if (!session) {
+      return;
+    }
+    setIsBusy(true);
+    try {
+      const handoff = await prepareReviewHandoff({ threadId: session.threadId });
+      appendMessage(`Prepared CA handoff package ${handoff.handoff_id.slice(0, 8)} for ${handoff.support_mode}.`);
+      await refreshBackendState(session.threadId);
+    } catch (error: unknown) {
+      appendMessage(`CA handoff preparation failed: ${error instanceof Error ? error.message : "unknown error"}`);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const handleOpenReviewHandoff = async (handoffId: string) => {
+    if (!session) {
+      return;
+    }
+    try {
+      const latestAuth = await loadAuthSession();
+      if (!latestAuth) {
+        throw new Error("Authentication required");
+      }
+      window.open(reviewHandoffPackageUrl(session.threadId, handoffId, latestAuth), "_blank", "noopener,noreferrer");
+    } catch (error: unknown) {
+      appendMessage(`CA handoff download failed: ${error instanceof Error ? error.message : "unknown error"}`);
+    }
+  };
+
+  const handleResumeQuarantine = async () => {
+    if (!session) {
+      return;
+    }
+    setIsBusy(true);
+    try {
+      await resumeThreadQuarantine({ threadId: session.threadId, note: "user_reviewed_anomaly" });
+      appendMessage("Automation quarantine cleared after review.");
+      await refreshBackendState(session.threadId);
+    } catch (error: unknown) {
+      appendMessage(`Failed to resume automation: ${error instanceof Error ? error.message : "unknown error"}`);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
   const sendMessage = (text: string) => {
     setMessages((prev) => [...prev, `You: ${text}`]);
     chrome.runtime.sendMessage({
@@ -603,11 +941,51 @@ export default function App(): JSX.Element {
     (approval) => approval.status === "approved" && approval.kind === "everify"
   );
 
+  if (!authSession) {
+    return (
+      <main>
+        <h2>IncomeTax Agent</h2>
+        {trustStatus ? <p>Portal trust: {trustStatus.message}</p> : null}
+        <p>Sign in to bind this browser device and start a protected filing session.</p>
+        <input
+          value={authEmail}
+          onChange={(event) => setAuthEmail(event.target.value)}
+          placeholder="Email address"
+          type="email"
+        />
+        <button disabled={isBusy} onClick={() => void handleLogin()}>
+          Sign in on this device
+        </button>
+      </main>
+    );
+  }
+
   return (
     <main>
       <h2>IncomeTax Agent</h2>
+      <p>Signed in as {identity?.email ?? authSession.email}</p>
+      <button disabled={isBusy} onClick={() => void handleLogout()}>
+        Sign out
+      </button>
+      {trustStatus ? <p>Portal trust: {trustStatus.message}</p> : null}
       {session ? <p>Thread: {session.threadId.slice(0, 8)}</p> : null}
-      <DetectedDetailsPane page={page} fields={detectedFields} validationErrors={validationErrors} />
+      <DetectedDetailsPane
+        page={page}
+        fields={detectedFields}
+        validationErrors={validationErrors}
+        validationHelp={validationHelp}
+        regimePreview={regimePreview}
+        isBusy={isBusy}
+        onRefreshRegimePreview={() => void handleRefreshRegimePreview()}
+        onPrepareRecommendedRegime={() => void handlePrepareRecommendedRegime()}
+      />
+      <SupportPane
+        supportAssessment={supportAssessment}
+        isBusy={isBusy}
+        onPrepareHandoff={() => void handlePrepareReviewHandoff()}
+        onOpenHandoff={(handoffId) => void handleOpenReviewHandoff(handoffId)}
+        onResumeQuarantine={() => void handleResumeQuarantine()}
+      />
       <ChatPane onSend={sendMessage} messages={messages} />
       <PendingActionsPane
         page={page}
@@ -632,6 +1010,8 @@ export default function App(): JSX.Element {
         submitApprovalApproved={submitApprovalApproved}
         everifyApprovalApproved={everifyApprovalApproved}
         nextRevisionNumber={nextRevisionNumber}
+        consents={consents}
+        purgeJobs={purgeJobs}
         onGenerateSummary={() => void handleGenerateSummary()}
         onPrepareSubmit={() => void handlePrepareSubmit()}
         onCompleteSubmission={(ackNo, portalRef) => void handleCompleteSubmission(ackNo, portalRef)}
@@ -639,7 +1019,8 @@ export default function App(): JSX.Element {
         onStartEVerify={(method) => void handleStartEVerify(method)}
         onCompleteEVerify={(portalRef) => void handleCompleteEVerify(portalRef)}
         onCreateRevision={(reason) => void handleCreateRevision(reason)}
-        getArtifactUrl={(artifactName) => (session ? filingArtifactUrl(session.threadId, artifactName) : "#")}
+        onRevokeConsent={(consentId) => void handleRevokeConsent(consentId)}
+        onOpenArtifact={(artifactName) => void handleOpenArtifact(artifactName)}
       />
       <EvidencePane facts={facts} />
     </main>

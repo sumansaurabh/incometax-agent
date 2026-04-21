@@ -15,14 +15,31 @@ from itx_backend.api.actions import (
     proposal,
     thread_actions,
     undo,
+    validation_help,
+    ValidationHelpRequest,
 )
 from itx_backend.api.threads import ThreadEnsureRequest, ensure_thread
 from itx_backend.db.session import close_connection_pool, get_pool, init_connection_pool
+from itx_backend.security.request_auth import reset_request_auth, set_request_auth
+from itx_backend.services.auth_runtime import AuthContext
 
 
 @unittest.skipUnless(os.getenv("ITX_DATABASE_URL"), "ITX_DATABASE_URL required for Postgres tests")
 class ActionsApiTest(unittest.IsolatedAsyncioTestCase):
+    def _bind_auth(self, user_id: str) -> None:
+        if hasattr(self, "_auth_token") and self._auth_token is not None:
+            reset_request_auth(self._auth_token)
+        self._auth_token = set_request_auth(
+            AuthContext(
+                user_id=user_id,
+                email=f"{user_id}@example.com",
+                device_id=f"device-{user_id}",
+                session_id=f"session-{user_id}",
+            )
+        )
+
     async def asyncSetUp(self) -> None:
+        self._auth_token = None
         await close_connection_pool()
         await init_connection_pool()
         pool = await get_pool()
@@ -37,9 +54,12 @@ class ActionsApiTest(unittest.IsolatedAsyncioTestCase):
             await connection.execute(
                 "truncate table validation_errors, field_fill_history, approvals, action_executions, action_proposals, filing_audit_trail, agent_checkpoints cascade"
             )
+        if self._auth_token is not None:
+            reset_request_auth(self._auth_token)
         await close_connection_pool()
 
     async def test_proposal_approval_execute_persists_action_audit(self) -> None:
+        self._bind_auth("user-1")
         await checkpointer.save(
             AgentState(
                 thread_id="thread-actions-1",
@@ -110,6 +130,7 @@ class ActionsApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(audit_count, 3)
 
     async def test_bank_change_targeted_fill_and_undo(self) -> None:
+        self._bind_auth("user-2")
         await checkpointer.save(
             AgentState(
                 thread_id="thread-actions-2",
@@ -172,6 +193,7 @@ class ActionsApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(activity["executions"]), 2)
 
     async def test_ensure_thread_and_browser_reported_execution(self) -> None:
+        self._bind_auth("user-3")
         ensured = await ensure_thread(ThreadEnsureRequest(user_id="user-3"))
         self.assertEqual(ensured.user_id, "user-3")
 
@@ -251,3 +273,43 @@ class ActionsApiTest(unittest.IsolatedAsyncioTestCase):
         activity = await thread_actions(ensured.thread_id)
         self.assertEqual(len(activity["executions"]), 1)
         self.assertEqual(activity["executions"][0]["results"]["executed_actions"][0]["read_after_write"]["previous_value"], "")
+
+    async def test_validation_help_translates_required_and_ifsc_errors(self) -> None:
+        self._bind_auth("user-4")
+        await checkpointer.save(
+            AgentState(
+                thread_id="thread-actions-4",
+                user_id="user-4",
+                current_page="bank-account",
+                portal_state={
+                    "page": "bank-account",
+                    "fields": {
+                        "#ifscCode": {"value": "", "label": "IFSC Code", "required": True},
+                    },
+                    "validationErrors": [],
+                },
+                tax_facts={
+                    "bank": {"ifsc": "HDFC0001234"},
+                },
+            )
+        )
+
+        translated = await validation_help(
+            ValidationHelpRequest(
+                thread_id="thread-actions-4",
+                page_type="bank-account",
+                portal_state={
+                    "page": "bank-account",
+                    "fields": {
+                        "#ifscCode": {"value": "", "label": "IFSC Code", "required": True},
+                    },
+                },
+                validation_errors=[
+                    {"field": "#ifscCode", "message": "IFSC code is required"},
+                ],
+            )
+        )
+
+        self.assertEqual(len(translated["items"]), 1)
+        self.assertIn("mandatory", translated["items"][0]["plain_english"].lower())
+        self.assertIn("HDFC0001234", translated["items"][0]["suggested_fix"])
