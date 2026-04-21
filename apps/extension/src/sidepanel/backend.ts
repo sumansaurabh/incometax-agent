@@ -106,6 +106,60 @@ export type TaxFactsResponse = {
   reconciliation: Record<string, unknown>;
 };
 
+export type SubmissionSummaryData = {
+  assessment_year: string;
+  itr_type: string;
+  regime: string;
+  gross_total_income: number;
+  total_deductions: number;
+  taxable_income: number;
+  net_tax_liability: number;
+  total_tax_paid: number;
+  tax_payable: number;
+  refund_due: number;
+  mismatch_count: number;
+  can_submit: boolean;
+  blocking_issues: string[];
+};
+
+export type FilingArtifacts = {
+  artifact_id: string;
+  ack_no?: string | null;
+  itr_v_storage_uri?: string | null;
+  json_export_uri?: string | null;
+  evidence_bundle_uri?: string | null;
+  summary_storage_uri?: string | null;
+  filed_at?: string | null;
+  artifact_manifest?: Record<string, unknown>;
+};
+
+export type EverificationRecord = {
+  record_id: string;
+  handoff_id: string;
+  method: string;
+  status: string;
+  target_url?: string | null;
+  portal_ref?: string | null;
+  handoff?: Record<string, unknown>;
+  created_at?: string | null;
+  verified_at?: string | null;
+};
+
+export type FilingStateResponse = {
+  thread_id: string;
+  submission_status: string;
+  submission_summary: SubmissionSummaryData | null;
+  pending_submission: Record<string, unknown> | null;
+  pending_everify: Record<string, unknown> | null;
+  everify_handoff: Record<string, unknown> | null;
+  artifacts: FilingArtifacts | null;
+  summary_record: Record<string, unknown> | null;
+  everification: EverificationRecord | null;
+  consents: Array<Record<string, unknown>>;
+  revision: Record<string, unknown> | null;
+  archived: boolean;
+};
+
 type RequestInitWithJson = RequestInit & {
   body?: string;
 };
@@ -213,6 +267,139 @@ export async function undoExecution(input: {
       portal_state: input.portalState,
     }),
   });
+}
+
+export async function fetchFilingState(threadId: string): Promise<FilingStateResponse> {
+  return request<FilingStateResponse>(`/api/filing/${threadId}`);
+}
+
+export async function generateSubmissionSummary(input: {
+  threadId: string;
+  isFinal?: boolean;
+}): Promise<{
+  submission_summary: SubmissionSummaryData | null;
+  submission_status: string;
+}> {
+  return request("/api/filing/summary", {
+    method: "POST",
+    body: JSON.stringify({
+      thread_id: input.threadId,
+      is_final: input.isFinal ?? true,
+    }),
+  });
+}
+
+export async function prepareSubmissionApproval(input: {
+  threadId: string;
+  isFinal?: boolean;
+}): Promise<{
+  submission_summary: SubmissionSummaryData | null;
+  pending_approvals: Array<Record<string, unknown>>;
+  submission_status: string;
+}> {
+  return request("/api/filing/submit/prepare", {
+    method: "POST",
+    body: JSON.stringify({
+      thread_id: input.threadId,
+      is_final: input.isFinal ?? true,
+    }),
+  });
+}
+
+export async function completeSubmission(input: {
+  threadId: string;
+  ackNo?: string;
+  portalRef?: string;
+  itrVText?: string;
+}): Promise<{
+  submission_status: string;
+  artifacts: FilingArtifacts;
+}> {
+  return request("/api/filing/submit/complete", {
+    method: "POST",
+    body: JSON.stringify({
+      thread_id: input.threadId,
+      ack_no: input.ackNo ?? null,
+      portal_ref: input.portalRef ?? null,
+      itr_v_text: input.itrVText ?? null,
+    }),
+  });
+}
+
+export async function prepareEVerifyApproval(input: {
+  threadId: string;
+  method: string;
+}): Promise<{
+  pending_approvals: Array<Record<string, unknown>>;
+  submission_status: string;
+}> {
+  return request("/api/filing/everify/prepare", {
+    method: "POST",
+    body: JSON.stringify({
+      thread_id: input.threadId,
+      method: input.method,
+    }),
+  });
+}
+
+export async function startEVerifyHandoff(input: {
+  threadId: string;
+  method?: string;
+}): Promise<{
+  submission_status: string;
+  everify_handoff: Record<string, unknown> | null;
+  everification: EverificationRecord | null;
+  pending_navigation?: { url?: string } | null;
+}> {
+  return request("/api/filing/everify/start", {
+    method: "POST",
+    body: JSON.stringify({
+      thread_id: input.threadId,
+      method: input.method ?? null,
+    }),
+  });
+}
+
+export async function completeEVerify(input: {
+  threadId: string;
+  handoffId: string;
+  portalRef?: string;
+}): Promise<{
+  submission_status: string;
+  everification: EverificationRecord;
+  archived: boolean;
+}> {
+  return request("/api/filing/everify/complete", {
+    method: "POST",
+    body: JSON.stringify({
+      thread_id: input.threadId,
+      handoff_id: input.handoffId,
+      portal_ref: input.portalRef ?? null,
+    }),
+  });
+}
+
+export async function createRevisionThread(input: {
+  threadId: string;
+  reason: string;
+  revisionNumber?: number;
+}): Promise<{
+  base_thread_id: string;
+  revision_thread_id: string;
+  revision_context: Record<string, unknown>;
+}> {
+  return request("/api/filing/revision", {
+    method: "POST",
+    body: JSON.stringify({
+      thread_id: input.threadId,
+      reason: input.reason,
+      revision_number: input.revisionNumber ?? 1,
+    }),
+  });
+}
+
+export function filingArtifactUrl(threadId: string, artifactName: "itr-v" | "offline-json" | "evidence-bundle" | "summary"): string {
+  return `${BACKEND_BASE_URL}/api/filing/${threadId}/artifacts/${artifactName}`;
 }
 
 export function normalizeApprovalItems(payload: ThreadActionsResponse): ApprovalItem[] {

@@ -6,7 +6,27 @@ Date: 2026-04-21
 
 - Scaffold-complete: the module or API surface exists and roughly matches the folder-level plan, but it does not yet satisfy the full documented outcome or exit criteria.
 - Partial: meaningful logic exists, but key behavior, persistence, integration, safety, or validation is still missing.
+- Implemented-in-code: the end-to-end repo path exists with durable persistence and automated validation, but live-account or operational exit criteria may still remain.
 - Missing: the documented capability is absent or only implied by comments/docs.
+
+## Implementation Update
+
+This audit started as a baseline scaffold review. Since then, the repository has moved materially forward and several statements below are now historically useful but no longer current.
+
+Implemented after the original audit:
+
+- Async Postgres-backed checkpoint persistence and thread resume.
+- Document upload/storage, extraction, normalization, evidence persistence, health-insurance parsing, and AIS-vs-doc reconciliation.
+- Durable proposals, approvals, executions, undo, and browser-reported read-after-write for guided autofill.
+- Completion-flow runtime with persisted `submission_summaries`, `consents`, `everification_status`, `filed_return_artifacts`, and `revision_threads`, plus filing APIs and sidepanel UI.
+
+Validation performed after these implementations:
+
+- `PYTHONPATH=apps/backend/src:apps/workers/src ITX_DATABASE_URL=postgresql://itx:itx@localhost:5432/itx python -m pytest apps/backend/tests/api/test_actions.py apps/backend/tests/api/test_filing.py` passed.
+- `PYTHONPATH=apps/backend/src:apps/workers/src python -m compileall apps/backend/src apps/workers/src` passed.
+- `pnpm --filter @itx/extension typecheck` passed.
+
+What is still materially pending now is concentrated in Phase 5 from `docs/PLAN.md`: broader taxpayer coverage, CA workspace depth, analytics, retention/revocation, notice/refund flows, and production hardening.
 
 ## What Was Reviewed
 
@@ -79,11 +99,11 @@ Bottom line:
 
 | Phase | Verdict | Why |
 |---|---|---|
-| Phase 0 - Foundations | Partial | Monorepo, backend, extension, CI, and shared packages exist, but checkpoint persistence is in-memory, CI masks failures, and security/auth are still thin. |
+| Phase 0 - Foundations | Partial | Monorepo, backend, extension, CI, and shared packages exist, and checkpoint persistence is now Postgres-backed, but CI/auth/security hardening is still thin. |
 | Phase 1 - Portal Copilot | Partial | Page detection, explanation, and evidence UI exist, but adapters return empty schemas and detection is mostly title/URL based. |
-| Phase 2 - Document Intelligence | Partial | Worker package structure exists and entity extraction is substantial, but actual parsers, normalization, queueing, and evidence persistence are mostly stubbed. |
-| Phase 3 - Guided Autofill | Partial | Fill-plan, approval, recovery, and execution nodes exist, but execution/readback are simulated and there is no durable approval/audit persistence. |
-| Phase 4 - Completion Flow | Partial | Submission summary, e-verify guidance, and revised-return branching exist, but archive/artifact generation is incomplete and final flow is not validated end to end. |
+| Phase 2 - Document Intelligence | Implemented-in-code | Postgres-backed documents, storage, queueing, extraction, normalization, evidence persistence, and reconciliation are implemented; broader fixture-bank accuracy gates remain to be expanded. |
+| Phase 3 - Guided Autofill | Implemented-in-code | Durable proposal/approval/execution persistence, live sidepanel approvals, browser execution/readback, and undo are implemented and validated in tests/typecheck. |
+| Phase 4 - Completion Flow | Implemented-in-code | Submission summary, consent ledger, artifact archive, e-verification handoff, and revision branching now have persistence, APIs, and sidepanel flow; live demo-account exit criteria remain unverified. |
 | Phase 5 - Scale And Hardening | Early partial | Replay, drift autopilot, offline export, analytics, and CA API scaffolds exist, but coverage, reviewer workflow, advanced security, and dashboards are incomplete. |
 
 ## Exit-Criteria Check
@@ -93,10 +113,10 @@ Bottom line:
 Key reasons:
 
 - Extension-to-backend round trip exists, but not as a verified, authenticated, production flow.
-- Checkpoints are not persisted in Postgres; they are held in-memory only.
+- Checkpoints are now persisted in Postgres, but CI quality gates and production auth still lag behind the roadmap.
 - CI is not a real quality gate because lint/test are allowed to fail.
 - Parser accuracy, replay coverage, persona flows, and live demo validations are not present.
-- Submission artifacts, approvals, and audit trails are not durably written to the data model described in `docs/DATA_MODEL.md`.
+- Submission artifacts, approvals, consents, and filing-runtime records are now durably written for the implemented path, but broader audit export, retention, and operational controls remain incomplete.
 
 ## 30-Point Plan Audit
 

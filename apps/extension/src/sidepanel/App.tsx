@@ -3,24 +3,37 @@ import React, { useEffect, useState } from "react";
 import {
   ApprovalItem,
   DetectedField,
+  EverificationRecord,
   ExecutionRecord,
+  FilingArtifacts,
   FillAction,
   FillPlan,
   PageContextPayload,
+  SubmissionSummaryData,
   ValidationError,
+  completeEVerify,
+  completeSubmission,
   createProposal,
+  createRevisionThread,
   decideApproval,
   ensureThread,
+  fetchFilingState,
   fetchTaxFacts,
   fetchThreadActions,
+  filingArtifactUrl,
+  generateSubmissionSummary,
   normalizeApprovalItems,
+  prepareEVerifyApproval,
+  prepareSubmissionApproval,
   recordExecution,
+  startEVerifyHandoff,
   undoExecution,
 } from "./backend";
 import { ChatPane } from "./panes/ChatPane";
 import { DetectedDetailsPane } from "./panes/DetectedDetailsPane";
 import { PendingActionsPane } from "./panes/PendingActionsPane";
 import { EvidencePane } from "./panes/EvidencePane";
+import { SubmissionPane } from "./panes/SubmissionPane";
 import { SidepanelSession, createSidepanelUserId, loadSidepanelSession, saveSidepanelSession } from "./session";
 
 type EvidenceSource = {
@@ -152,6 +165,12 @@ export default function App(): JSX.Element {
   const [approvals, setApprovals] = useState<ApprovalItem[]>([]);
   const [approvedActions, setApprovedActions] = useState<string[]>([]);
   const [executions, setExecutions] = useState<ExecutionRecord[]>([]);
+  const [submissionSummary, setSubmissionSummary] = useState<SubmissionSummaryData | null>(null);
+  const [submissionStatus, setSubmissionStatus] = useState("draft");
+  const [filingArtifacts, setFilingArtifacts] = useState<FilingArtifacts | null>(null);
+  const [everification, setEverification] = useState<EverificationRecord | null>(null);
+  const [isArchived, setIsArchived] = useState(false);
+  const [nextRevisionNumber, setNextRevisionNumber] = useState(1);
   const [isBusy, setIsBusy] = useState(false);
 
   const appendMessage = (message: string) => {
@@ -180,15 +199,22 @@ export default function App(): JSX.Element {
   };
 
   const refreshBackendState = async (threadId: string) => {
-    const [actionsPayload, taxFactsPayload] = await Promise.all([
+    const [actionsPayload, taxFactsPayload, filingPayload] = await Promise.all([
       fetchThreadActions(threadId),
       fetchTaxFacts(threadId),
+      fetchFilingState(threadId),
     ]);
     setFillPlan(actionsPayload.fill_plan);
     setApprovals(normalizeApprovalItems(actionsPayload));
     setApprovedActions(actionsPayload.approved_actions ?? []);
     setExecutions(actionsPayload.executions ?? []);
     setFacts(flattenFacts(taxFactsPayload.facts ?? {}, taxFactsPayload.fact_evidence ?? {}));
+    setSubmissionSummary(filingPayload.submission_summary);
+    setSubmissionStatus(filingPayload.submission_status ?? "draft");
+    setFilingArtifacts(filingPayload.artifacts);
+    setEverification(filingPayload.everification);
+    setIsArchived(Boolean(filingPayload.archived));
+    setNextRevisionNumber(Number((filingPayload.revision?.revision_number as number | undefined) ?? 0) + 1);
   };
 
   const initialize = async () => {
@@ -405,6 +431,160 @@ export default function App(): JSX.Element {
     }
   };
 
+  const handleGenerateSummary = async () => {
+    if (!session) {
+      return;
+    }
+
+    setIsBusy(true);
+    try {
+      const result = await generateSubmissionSummary({ threadId: session.threadId, isFinal: true });
+      setSubmissionSummary(result.submission_summary);
+      setSubmissionStatus(result.submission_status);
+      appendMessage("Submission summary refreshed.");
+      await refreshBackendState(session.threadId);
+    } catch (error: unknown) {
+      appendMessage(`Summary generation failed: ${error instanceof Error ? error.message : "unknown error"}`);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const handlePrepareSubmit = async () => {
+    if (!session) {
+      return;
+    }
+
+    setIsBusy(true);
+    try {
+      await prepareSubmissionApproval({ threadId: session.threadId, isFinal: true });
+      appendMessage("Submission approval requested.");
+      await refreshBackendState(session.threadId);
+    } catch (error: unknown) {
+      appendMessage(`Submission approval failed: ${error instanceof Error ? error.message : "unknown error"}`);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const handleCompleteSubmission = async (ackNo: string, portalRef: string) => {
+    if (!session) {
+      return;
+    }
+
+    setIsBusy(true);
+    try {
+      const result = await completeSubmission({
+        threadId: session.threadId,
+        ackNo,
+        portalRef,
+      });
+      setSubmissionStatus(result.submission_status);
+      setFilingArtifacts(result.artifacts);
+      appendMessage(`Submission archived${result.artifacts.ack_no ? ` with acknowledgement ${result.artifacts.ack_no}` : ""}.`);
+      await refreshBackendState(session.threadId);
+    } catch (error: unknown) {
+      appendMessage(`Submission archive failed: ${error instanceof Error ? error.message : "unknown error"}`);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const handlePrepareEVerify = async (method: string) => {
+    if (!session) {
+      return;
+    }
+
+    setIsBusy(true);
+    try {
+      await prepareEVerifyApproval({ threadId: session.threadId, method });
+      appendMessage(`E-verify approval requested for ${method.replace(/_/g, " ")}.`);
+      await refreshBackendState(session.threadId);
+    } catch (error: unknown) {
+      appendMessage(`E-verify approval failed: ${error instanceof Error ? error.message : "unknown error"}`);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const handleStartEVerify = async (method: string) => {
+    if (!session) {
+      return;
+    }
+
+    setIsBusy(true);
+    try {
+      const result = await startEVerifyHandoff({ threadId: session.threadId, method });
+      const targetUrl =
+        (typeof result.pending_navigation?.url === "string" ? result.pending_navigation.url : null) ??
+        (typeof result.everification?.target_url === "string" ? result.everification.target_url : null) ??
+        (typeof result.everify_handoff?.target_url === "string" ? result.everify_handoff.target_url : null);
+      if (targetUrl) {
+        const navigation = await sendRuntimeMessage<RuntimeResponse<{ tabId: number; url: string }>>({
+          type: "navigate_active_tab",
+          payload: { url: targetUrl },
+        });
+        if (!navigation.ok) {
+          throw new Error(navigation.error ?? "Failed to open e-verification page");
+        }
+      }
+      appendMessage(`Opened e-verification handoff for ${method.replace(/_/g, " ")}.`);
+      await refreshBackendState(session.threadId);
+    } catch (error: unknown) {
+      appendMessage(`E-verify handoff failed: ${error instanceof Error ? error.message : "unknown error"}`);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const handleCompleteEVerify = async (portalRef: string) => {
+    if (!session || !everification?.handoff_id) {
+      return;
+    }
+
+    setIsBusy(true);
+    try {
+      const result = await completeEVerify({
+        threadId: session.threadId,
+        handoffId: everification.handoff_id,
+        portalRef,
+      });
+      setSubmissionStatus(result.submission_status);
+      setEverification(result.everification);
+      setIsArchived(Boolean(result.archived));
+      appendMessage("E-verification marked complete.");
+      await refreshBackendState(session.threadId);
+    } catch (error: unknown) {
+      appendMessage(`E-verification completion failed: ${error instanceof Error ? error.message : "unknown error"}`);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const handleCreateRevision = async (reason: string) => {
+    if (!session) {
+      return;
+    }
+
+    setIsBusy(true);
+    try {
+      const result = await createRevisionThread({
+        threadId: session.threadId,
+        reason,
+        revisionNumber: nextRevisionNumber,
+      });
+      const nextSession = { threadId: result.revision_thread_id, userId: session.userId };
+      await saveSidepanelSession(nextSession);
+      setSession(nextSession);
+      appendMessage(`Revision branch created: ${result.revision_thread_id.slice(0, 8)}`);
+      await refreshBackendState(nextSession.threadId);
+    } catch (error: unknown) {
+      appendMessage(`Revision creation failed: ${error instanceof Error ? error.message : "unknown error"}`);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
   const sendMessage = (text: string) => {
     setMessages((prev) => [...prev, `You: ${text}`]);
     chrome.runtime.sendMessage({
@@ -415,6 +595,13 @@ export default function App(): JSX.Element {
       }
     });
   };
+
+  const submitApprovalApproved = approvals.some(
+    (approval) => approval.status === "approved" && ["submit_final", "submit_draft"].includes(approval.kind)
+  );
+  const everifyApprovalApproved = approvals.some(
+    (approval) => approval.status === "approved" && approval.kind === "everify"
+  );
 
   return (
     <main>
@@ -434,6 +621,25 @@ export default function App(): JSX.Element {
         onReject={(approvalId) => void handleApproval(approvalId, false)}
         onExecute={() => void handleExecute()}
         onUndo={() => void handleUndo()}
+      />
+      <SubmissionPane
+        submissionStatus={submissionStatus}
+        submissionSummary={submissionSummary}
+        artifacts={filingArtifacts}
+        everification={everification}
+        archived={isArchived}
+        isBusy={isBusy}
+        submitApprovalApproved={submitApprovalApproved}
+        everifyApprovalApproved={everifyApprovalApproved}
+        nextRevisionNumber={nextRevisionNumber}
+        onGenerateSummary={() => void handleGenerateSummary()}
+        onPrepareSubmit={() => void handlePrepareSubmit()}
+        onCompleteSubmission={(ackNo, portalRef) => void handleCompleteSubmission(ackNo, portalRef)}
+        onPrepareEVerify={(method) => void handlePrepareEVerify(method)}
+        onStartEVerify={(method) => void handleStartEVerify(method)}
+        onCompleteEVerify={(portalRef) => void handleCompleteEVerify(portalRef)}
+        onCreateRevision={(reason) => void handleCreateRevision(reason)}
+        getArtifactUrl={(artifactName) => (session ? filingArtifactUrl(session.threadId, artifactName) : "#")}
       />
       <EvidencePane facts={facts} />
     </main>

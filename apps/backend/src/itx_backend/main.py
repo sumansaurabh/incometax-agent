@@ -13,6 +13,7 @@ from itx_backend.api import (
     documents,
     drift,
     exports,
+    filing,
     replay,
     security,
     tax_facts,
@@ -66,6 +67,7 @@ def create_app() -> FastAPI:
     app.include_router(autopilot.router)
     app.include_router(replay.router)
     app.include_router(exports.router)
+    app.include_router(filing.router)
     app.include_router(ca_workspace.router)
     app.include_router(security.router)
     app.include_router(tax_facts.router)

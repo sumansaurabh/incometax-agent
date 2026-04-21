@@ -17,6 +17,7 @@ import json
 
 from ..state import AgentState
 from itx_backend.services.action_runtime import action_runtime, detect_sensitivity
+from itx_backend.services.filing_runtime import filing_runtime
 
 
 class ApprovalType(str, Enum):
@@ -115,8 +116,8 @@ CONSENT_TEXTS = {
         "I authorize the submission of this return."
     ),
     ApprovalType.EVERIFY: (
-        "I am ready to e-verify my Income Tax Return. The agent will guide me to the "
-        "verification page, but I will complete the OTP/verification step myself."
+        "I authorize the agent to guide me to e-verification using {method_name}. "
+        "I understand I must complete OTP / credential entry myself."
     ),
 }
 
@@ -212,6 +213,7 @@ async def approval_gate(state: AgentState) -> dict[str, Any]:
     user_id = state.get("user_id", "unknown")
     fill_plan = state.get("fill_plan")
     pending_submission = state.get("pending_submission")
+    pending_everify = state.get("pending_everify")
     user_response = state.get("last_user_response", {})
     
     # Check if we have a pending approval response
@@ -273,6 +275,30 @@ async def approval_gate(state: AgentState) -> dict[str, Any]:
                                 action["formatted_value"] = str(action_modification["value"])
                 
                 if approved:
+                    response_hash = hash_consent_response(
+                        approval.get("consent_text", ""),
+                        True,
+                        user_id,
+                    )
+                    if approval.get("approval_type") in {
+                        ApprovalType.SUBMIT_DRAFT.value,
+                        ApprovalType.SUBMIT_FINAL.value,
+                        ApprovalType.EVERIFY.value,
+                    }:
+                        await filing_runtime.record_consent(
+                            thread_id=thread_id,
+                            user_id=user_id,
+                            purpose=approval.get("approval_type", "unknown"),
+                            approval_key=approval_id,
+                            scope={
+                                "description": approval.get("description"),
+                                "action_ids": approval.get("action_ids", []),
+                                "proposal_id": approval.get("proposal_id"),
+                            },
+                            consent_text=approval.get("consent_text", ""),
+                            response_hash=response_hash,
+                            granted_at=response.responded_at,
+                        )
                     message = f"✅ Approval granted for: {approval.get('description')}"
                     return {
                         "messages": state.get("messages", []) + [{
@@ -290,11 +316,7 @@ async def approval_gate(state: AgentState) -> dict[str, Any]:
                         "awaiting_approval": False,
                         "current_approval_id": None,
                         "last_user_response": {},
-                        "response_hash": hash_consent_response(
-                            approval.get("consent_text", ""),
-                            True,
-                            user_id
-                        )
+                        "response_hash": response_hash
                     }
                 else:
                     message = f"❌ Approval denied for: {approval.get('description')}"
@@ -328,6 +350,14 @@ async def approval_gate(state: AgentState) -> dict[str, Any]:
             "tax_result": pending_submission.get("tax_result", "Calculating..."),
         }
         action_ids = ["submit"]
+
+    elif pending_everify:
+        approval_type = ApprovalType.EVERIFY
+        method_name = str(pending_everify.get("method", "aadhaar_otp")).replace("_", " ").title()
+        details = {
+            "method_name": method_name,
+        }
+        action_ids = ["everify"]
         
     elif fill_plan and fill_plan.get("total_actions", 0) > 0:
         # Fill plan approval (Phase 3)
@@ -392,7 +422,7 @@ async def approval_gate(state: AgentState) -> dict[str, Any]:
     proposal_id = await action_runtime.create_proposal(
         thread_id=thread_id,
         proposal_type=approval_type.value,
-        dsl=fill_plan or pending_submission or {},
+        dsl=fill_plan or pending_submission or pending_everify or {},
         reason=request.description,
         sensitivity=detect_sensitivity(fill_plan or {}),
         expires_at=request.expires_at,

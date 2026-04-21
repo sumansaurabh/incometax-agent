@@ -77,6 +77,20 @@ export function initRouter(): void {
       return true;
     }
 
+    if (msg?.type === "navigate_active_tab") {
+      void (async () => {
+        const tabId = msg.payload?.tabId ?? await getActiveTabId();
+        const updated = await chrome.tabs.update(tabId, { url: msg.payload?.url });
+        sendResponse({ ok: true, payload: { tabId: updated.id, url: updated.url } });
+      })().catch((error: unknown) => {
+        sendResponse({
+          ok: false,
+          error: error instanceof Error ? error.message : "unknown_error",
+        });
+      });
+      return true;
+    }
+
     return false;
   });
 }
