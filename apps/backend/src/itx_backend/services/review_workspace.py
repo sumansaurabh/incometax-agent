@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import uuid
 from datetime import datetime, timezone
@@ -13,6 +14,11 @@ from itx_backend.db.session import get_pool
 from itx_backend.security.quarantine import current_quarantine_status
 from itx_backend.services.action_runtime import action_runtime
 from itx_backend.services.document_storage import document_storage
+from itx_backend.services.filing_runtime import filing_runtime
+
+
+def _normalize_email(email: str) -> str:
+    return email.strip().lower()
 
 
 def _truthy(value: Any) -> bool:
@@ -169,6 +175,144 @@ def assess_agent_state(state: AgentState, activity: Optional[dict[str, Any]] = N
 
 
 class ReviewWorkspaceService:
+    async def _claim_active_review_access(self, *, reviewer_email: str, reviewer_user_id: str, thread_id: Optional[str] = None) -> None:
+        pool = await get_pool()
+        async with pool.acquire() as connection:
+            if thread_id is None:
+                await connection.execute(
+                    """
+                    update review_access_grants
+                    set reviewer_user_id = $1,
+                        accepted_at = coalesce(accepted_at, now())
+                    where reviewer_email = $2 and status = 'active'
+                    """,
+                    reviewer_user_id,
+                    _normalize_email(reviewer_email),
+                )
+            else:
+                await connection.execute(
+                    """
+                    update review_access_grants
+                    set reviewer_user_id = $1,
+                        accepted_at = coalesce(accepted_at, now())
+                    where thread_id = $2 and reviewer_email = $3 and status = 'active'
+                    """,
+                    reviewer_user_id,
+                    thread_id,
+                    _normalize_email(reviewer_email),
+                )
+
+    async def _shared_thread_ids_for_actor(self, *, reviewer_email: str, reviewer_user_id: str) -> list[str]:
+        await self._claim_active_review_access(reviewer_email=reviewer_email, reviewer_user_id=reviewer_user_id)
+        pool = await get_pool()
+        async with pool.acquire() as connection:
+            rows = await connection.fetch(
+                """
+                select thread_id
+                from review_access_grants
+                where reviewer_email = $1 and status = 'active'
+                order by created_at desc
+                """,
+                _normalize_email(reviewer_email),
+            )
+        return [row["thread_id"] for row in rows]
+
+    async def list_accessible_states(self, *, user_id: str, email: str) -> list[tuple[AgentState, str]]:
+        latest_states = await checkpointer.list_latest_states()
+        shared_thread_ids = set(await self._shared_thread_ids_for_actor(reviewer_email=email, reviewer_user_id=user_id))
+        accessible: list[tuple[AgentState, str]] = []
+        seen: set[str] = set()
+        for state in latest_states:
+            if state.user_id == user_id:
+                accessible.append((state, "owner"))
+                seen.add(state.thread_id)
+        for thread_id in shared_thread_ids:
+            if thread_id in seen:
+                continue
+            state = await checkpointer.latest(thread_id)
+            if state is not None:
+                accessible.append((state, "reviewer"))
+                seen.add(thread_id)
+        return accessible
+
+    async def get_accessible_state(self, *, thread_id: str, user_id: str, email: str) -> tuple[AgentState, str]:
+        state = await checkpointer.latest(thread_id)
+        if state is None:
+            raise KeyError(thread_id)
+        if state.user_id == user_id:
+            return state, "owner"
+
+        shared_thread_ids = set(await self._shared_thread_ids_for_actor(reviewer_email=email, reviewer_user_id=user_id))
+        if thread_id in shared_thread_ids:
+            await self._claim_active_review_access(reviewer_email=email, reviewer_user_id=user_id, thread_id=thread_id)
+            return state, "reviewer"
+
+        raise PermissionError(thread_id)
+
+    async def grant_reviewer_access(
+        self,
+        *,
+        thread_id: str,
+        owner_user_id: str,
+        reviewer_email: str,
+        scope: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        grant_id = uuid.uuid4()
+        normalized_email = _normalize_email(reviewer_email)
+        pool = await get_pool()
+        async with pool.acquire() as connection:
+            await connection.execute(
+                """
+                insert into review_access_grants (
+                    id, thread_id, owner_user_id, reviewer_email, status, scope
+                )
+                values ($1, $2, $3, $4, 'active', $5::jsonb)
+                on conflict (thread_id, reviewer_email) do update
+                set status = 'active',
+                    owner_user_id = excluded.owner_user_id,
+                    scope = excluded.scope,
+                    revoked_at = null
+                """,
+                grant_id,
+                thread_id,
+                owner_user_id,
+                normalized_email,
+                json.dumps(scope or {}, sort_keys=True),
+            )
+        return await self.get_access_grant(thread_id=thread_id, reviewer_email=normalized_email)
+
+    async def get_access_grant(self, *, thread_id: str, reviewer_email: str) -> dict[str, Any]:
+        pool = await get_pool()
+        async with pool.acquire() as connection:
+            row = await connection.fetchrow(
+                """
+                select id, thread_id, owner_user_id, reviewer_email, reviewer_user_id,
+                       status, scope::text as scope, created_at, accepted_at, revoked_at
+                from review_access_grants
+                where thread_id = $1 and reviewer_email = $2
+                """,
+                thread_id,
+                _normalize_email(reviewer_email),
+            )
+        if row is None:
+            raise KeyError(thread_id)
+        return self._serialize_access_grant(row)
+
+    async def list_access_grants(self, *, thread_id: str) -> list[dict[str, Any]]:
+        pool = await get_pool()
+        async with pool.acquire() as connection:
+            rows = await connection.fetch(
+                """
+                select id, thread_id, owner_user_id, reviewer_email, reviewer_user_id,
+                       status, scope::text as scope, created_at, accepted_at, revoked_at
+                from review_access_grants
+                where thread_id = $1
+                order by created_at desc
+                """,
+                thread_id,
+            )
+        return [self._serialize_access_grant(row) for row in rows]
+
     async def support_assessment(self, thread_id: str) -> dict[str, Any]:
         state = await checkpointer.latest(thread_id)
         if state is None:
@@ -176,6 +320,7 @@ class ReviewWorkspaceService:
         activity = await action_runtime.list_thread_activity(thread_id)
         assessment = assess_agent_state(state, activity)
         assessment["handoffs"] = await self.list_handoffs(thread_id)
+        assessment["reviewer_signoffs"] = await self.list_signoffs(thread_id)
         return assessment
 
     async def prepare_handoff(
@@ -258,6 +403,255 @@ class ReviewWorkspaceService:
 
         return await self.get_handoff(thread_id, handoff_id)
 
+    async def request_signoff(
+        self,
+        *,
+        thread_id: str,
+        approval_key: str,
+        owner_user_id: str,
+        reviewer_email: str,
+        note: Optional[str] = None,
+    ) -> dict[str, Any]:
+        normalized_email = _normalize_email(reviewer_email)
+        pool = await get_pool()
+        async with pool.acquire() as connection:
+            approval = await connection.fetchrow(
+                """
+                select approval_key, proposal_id, kind, description, status
+                from approvals
+                where thread_id = $1 and approval_key = $2
+                """,
+                thread_id,
+                approval_key,
+            )
+            if approval is None:
+                raise KeyError(approval_key)
+
+        await self.grant_reviewer_access(
+            thread_id=thread_id,
+            owner_user_id=owner_user_id,
+            reviewer_email=normalized_email,
+            scope={
+                "thread_id": thread_id,
+                "approval_key": approval_key,
+                "proposal_id": str(approval["proposal_id"]) if approval["proposal_id"] else None,
+                "kind": approval["kind"],
+            },
+        )
+
+        signoff_id = uuid.uuid4()
+        pool = await get_pool()
+        async with pool.acquire() as connection:
+            await connection.execute(
+                """
+                insert into reviewer_signoffs (
+                    id, thread_id, approval_key, proposal_id, owner_user_id,
+                    reviewer_email, status, request_note, details_json
+                )
+                values ($1, $2, $3, $4, $5, $6, 'pending_reviewer', $7, $8::jsonb)
+                on conflict (approval_key) do update
+                set reviewer_email = excluded.reviewer_email,
+                    status = 'pending_reviewer',
+                    request_note = excluded.request_note,
+                    reviewer_note = null,
+                    client_note = null,
+                    reviewer_user_id = null,
+                    reviewed_at = null,
+                    client_decided_at = null,
+                    client_consent_key = null,
+                    details_json = excluded.details_json
+                """,
+                signoff_id,
+                thread_id,
+                approval_key,
+                approval["proposal_id"],
+                owner_user_id,
+                normalized_email,
+                note,
+                json.dumps(
+                    {
+                        "approval_kind": approval["kind"],
+                        "approval_description": approval["description"],
+                        "approval_status": approval["status"],
+                    },
+                    sort_keys=True,
+                ),
+            )
+        return await self.get_signoff_by_approval_key(thread_id=thread_id, approval_key=approval_key)
+
+    async def reviewer_decision(
+        self,
+        *,
+        signoff_id: str,
+        reviewer_user_id: str,
+        reviewer_email: str,
+        approved: bool,
+        note: Optional[str] = None,
+    ) -> dict[str, Any]:
+        normalized_email = _normalize_email(reviewer_email)
+        pool = await get_pool()
+        async with pool.acquire() as connection:
+            row = await connection.fetchrow(
+                """
+                update reviewer_signoffs
+                set reviewer_user_id = $2,
+                    status = $3,
+                    reviewer_note = $4,
+                    reviewed_at = now()
+                where id = $1::uuid and reviewer_email = $5
+                returning thread_id, approval_key
+                """,
+                signoff_id,
+                reviewer_user_id,
+                "reviewer_approved" if approved else "reviewer_rejected",
+                note,
+                normalized_email,
+            )
+        if row is None:
+            raise KeyError(signoff_id)
+        await self._claim_active_review_access(reviewer_email=normalized_email, reviewer_user_id=reviewer_user_id, thread_id=row["thread_id"])
+        return await self.get_signoff_by_approval_key(thread_id=row["thread_id"], approval_key=row["approval_key"])
+
+    async def client_counter_consent(
+        self,
+        *,
+        signoff_id: str,
+        owner_user_id: str,
+        approved: bool,
+        note: Optional[str] = None,
+    ) -> dict[str, Any]:
+        consent_key = f"reviewer-signoff:{signoff_id}"
+        pool = await get_pool()
+        async with pool.acquire() as connection:
+            row = await connection.fetchrow(
+                """
+                select thread_id, approval_key, reviewer_email, details_json::text as details_json, status
+                from reviewer_signoffs
+                where id = $1::uuid and owner_user_id = $2
+                """,
+                signoff_id,
+                owner_user_id,
+            )
+        if row is None:
+            raise KeyError(signoff_id)
+        if row["status"] != "reviewer_approved":
+            raise ValueError("reviewer_signoff_not_ready")
+
+        pool = await get_pool()
+        async with pool.acquire() as connection:
+            await connection.execute(
+                """
+                update reviewer_signoffs
+                set status = $2,
+                    client_note = $3,
+                    client_decided_at = now(),
+                    client_consent_key = $4
+                where id = $1::uuid
+                """,
+                signoff_id,
+                "client_approved" if approved else "client_rejected",
+                note,
+                consent_key,
+            )
+
+        if approved:
+            consent_text = (
+                f"I counter-consent to reviewer sign-off for approval {row['approval_key']} "
+                f"reviewed by {row['reviewer_email']}."
+            )
+            response_hash = hashlib.sha256(
+                json.dumps(
+                    {
+                        "signoff_id": signoff_id,
+                        "approved": True,
+                        "owner_user_id": owner_user_id,
+                        "note": note,
+                    },
+                    sort_keys=True,
+                ).encode("utf-8")
+            ).hexdigest()
+            await filing_runtime.record_consent(
+                thread_id=row["thread_id"],
+                user_id=owner_user_id,
+                purpose="reviewer_counter_consent",
+                approval_key=consent_key,
+                scope={
+                    "signoff_id": signoff_id,
+                    "approval_key": row["approval_key"],
+                    "reviewer_email": row["reviewer_email"],
+                    "details": json.loads(row["details_json"] or "{}"),
+                },
+                consent_text=consent_text,
+                response_hash=response_hash,
+                granted_at=datetime.now(timezone.utc).isoformat(),
+            )
+
+        return await self.get_signoff(thread_id=row["thread_id"], signoff_id=signoff_id)
+
+    async def list_signoffs(self, thread_id: str) -> list[dict[str, Any]]:
+        pool = await get_pool()
+        async with pool.acquire() as connection:
+            rows = await connection.fetch(
+                """
+                select rs.id, rs.thread_id, rs.approval_key, rs.proposal_id,
+                       rs.owner_user_id, rs.reviewer_email, rs.reviewer_user_id,
+                       rs.status, rs.request_note, rs.reviewer_note, rs.client_note,
+                       rs.client_consent_key, rs.details_json::text as details_json,
+                       rs.created_at, rs.reviewed_at, rs.client_decided_at,
+                       a.kind as approval_kind, a.description as approval_description, a.status as approval_status
+                from reviewer_signoffs rs
+                left join approvals a on a.approval_key = rs.approval_key
+                where rs.thread_id = $1
+                order by rs.created_at desc
+                """,
+                thread_id,
+            )
+        return [self._serialize_signoff(row) for row in rows]
+
+    async def get_signoff(self, *, thread_id: str, signoff_id: str) -> dict[str, Any]:
+        pool = await get_pool()
+        async with pool.acquire() as connection:
+            row = await connection.fetchrow(
+                """
+                select rs.id, rs.thread_id, rs.approval_key, rs.proposal_id,
+                       rs.owner_user_id, rs.reviewer_email, rs.reviewer_user_id,
+                       rs.status, rs.request_note, rs.reviewer_note, rs.client_note,
+                       rs.client_consent_key, rs.details_json::text as details_json,
+                       rs.created_at, rs.reviewed_at, rs.client_decided_at,
+                       a.kind as approval_kind, a.description as approval_description, a.status as approval_status
+                from reviewer_signoffs rs
+                left join approvals a on a.approval_key = rs.approval_key
+                where rs.thread_id = $1 and rs.id = $2::uuid
+                """,
+                thread_id,
+                signoff_id,
+            )
+        if row is None:
+            raise KeyError(signoff_id)
+        return self._serialize_signoff(row)
+
+    async def get_signoff_by_approval_key(self, *, thread_id: str, approval_key: str) -> dict[str, Any]:
+        pool = await get_pool()
+        async with pool.acquire() as connection:
+            row = await connection.fetchrow(
+                """
+                select rs.id, rs.thread_id, rs.approval_key, rs.proposal_id,
+                       rs.owner_user_id, rs.reviewer_email, rs.reviewer_user_id,
+                       rs.status, rs.request_note, rs.reviewer_note, rs.client_note,
+                       rs.client_consent_key, rs.details_json::text as details_json,
+                       rs.created_at, rs.reviewed_at, rs.client_decided_at,
+                       a.kind as approval_kind, a.description as approval_description, a.status as approval_status
+                from reviewer_signoffs rs
+                left join approvals a on a.approval_key = rs.approval_key
+                where rs.thread_id = $1 and rs.approval_key = $2
+                """,
+                thread_id,
+                approval_key,
+            )
+        if row is None:
+            raise KeyError(approval_key)
+        return self._serialize_signoff(row)
+
     async def list_handoffs(self, thread_id: str) -> list[dict[str, Any]]:
         pool = await get_pool()
         async with pool.acquire() as connection:
@@ -318,6 +712,43 @@ class ReviewWorkspaceService:
             "package_storage_uri": row["package_storage_uri"],
             "created_at": row["created_at"].isoformat() if row["created_at"] else None,
             "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+        }
+
+    def _serialize_access_grant(self, row: Record) -> dict[str, Any]:
+        return {
+            "grant_id": str(row["id"]),
+            "thread_id": row["thread_id"],
+            "owner_user_id": row["owner_user_id"],
+            "reviewer_email": row["reviewer_email"],
+            "reviewer_user_id": row["reviewer_user_id"],
+            "status": row["status"],
+            "scope": json.loads(row["scope"] or "{}"),
+            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+            "accepted_at": row["accepted_at"].isoformat() if row["accepted_at"] else None,
+            "revoked_at": row["revoked_at"].isoformat() if row["revoked_at"] else None,
+        }
+
+    def _serialize_signoff(self, row: Record) -> dict[str, Any]:
+        return {
+            "signoff_id": str(row["id"]),
+            "thread_id": row["thread_id"],
+            "approval_key": row["approval_key"],
+            "proposal_id": str(row["proposal_id"]) if row["proposal_id"] else None,
+            "owner_user_id": row["owner_user_id"],
+            "reviewer_email": row["reviewer_email"],
+            "reviewer_user_id": row["reviewer_user_id"],
+            "status": row["status"],
+            "request_note": row["request_note"],
+            "reviewer_note": row["reviewer_note"],
+            "client_note": row["client_note"],
+            "client_consent_key": row["client_consent_key"],
+            "details": json.loads(row["details_json"] or "{}"),
+            "approval_kind": row["approval_kind"],
+            "approval_description": row["approval_description"],
+            "approval_status": row["approval_status"],
+            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+            "reviewed_at": row["reviewed_at"].isoformat() if row["reviewed_at"] else None,
+            "client_decided_at": row["client_decided_at"].isoformat() if row["client_decided_at"] else None,
         }
 
 

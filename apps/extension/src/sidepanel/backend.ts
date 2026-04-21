@@ -67,6 +67,33 @@ export type ApprovalItem = {
   actionIds: string[];
   expiresAt?: string | null;
   proposalId?: string | null;
+  reviewerStatus?: string | null;
+  reviewerEmail?: string | null;
+  reviewerNote?: string | null;
+  clientNote?: string | null;
+  signoffId?: string | null;
+};
+
+export type ReviewerSignoff = {
+  signoff_id: string;
+  thread_id: string;
+  approval_key: string;
+  proposal_id?: string | null;
+  owner_user_id: string;
+  reviewer_email: string;
+  reviewer_user_id?: string | null;
+  status: string;
+  request_note?: string | null;
+  reviewer_note?: string | null;
+  client_note?: string | null;
+  client_consent_key?: string | null;
+  details: Record<string, unknown>;
+  approval_kind?: string | null;
+  approval_description?: string | null;
+  approval_status?: string | null;
+  created_at?: string | null;
+  reviewed_at?: string | null;
+  client_decided_at?: string | null;
 };
 
 export type ExecutedAction = FillAction & {
@@ -95,6 +122,7 @@ export type ThreadActionsResponse = {
   proposals: Array<Record<string, unknown>>;
   approvals: Array<Record<string, unknown>>;
   executions: ExecutionRecord[];
+  reviewer_signoffs: ReviewerSignoff[];
   pending_approvals: Array<Record<string, unknown>>;
   approved_actions: string[];
   fill_plan: FillPlan | null;
@@ -677,6 +705,37 @@ export async function prepareReviewHandoff(input: {
   });
 }
 
+export async function requestReviewerSignoff(input: {
+  threadId: string;
+  approvalId: string;
+  reviewerEmail: string;
+  note?: string;
+}): Promise<ReviewerSignoff> {
+  return request("/api/ca/reviewers/signoff/request", {
+    method: "POST",
+    body: JSON.stringify({
+      thread_id: input.threadId,
+      approval_id: input.approvalId,
+      reviewer_email: input.reviewerEmail,
+      note: input.note ?? null,
+    }),
+  });
+}
+
+export async function counterConsentReviewerSignoff(input: {
+  signoffId: string;
+  approved?: boolean;
+  note?: string;
+}): Promise<ReviewerSignoff> {
+  return request(`/api/ca/reviewers/signoff/${input.signoffId}/counter-consent`, {
+    method: "POST",
+    body: JSON.stringify({
+      approved: input.approved ?? true,
+      note: input.note ?? null,
+    }),
+  });
+}
+
 export async function quarantineThread(input: {
   threadId: string;
   reason?: string;
@@ -728,13 +787,23 @@ export function reviewHandoffPackageUrl(
 
 export function normalizeApprovalItems(payload: ThreadActionsResponse): ApprovalItem[] {
   const approvals = payload.approvals.length > 0 ? payload.approvals : payload.pending_approvals;
-  return approvals.map((approval) => ({
-    approvalId: String(approval.approval_id ?? approval.approvalId ?? ""),
-    description: String(approval.description ?? "Approval required"),
-    status: String(approval.status ?? "pending"),
-    kind: String(approval.kind ?? approval.approval_type ?? "fill_plan"),
-    actionIds: Array.isArray(approval.action_ids) ? (approval.action_ids as string[]) : [],
-    expiresAt: (approval.expires_at as string | null | undefined) ?? null,
-    proposalId: (approval.proposal_id as string | null | undefined) ?? null,
-  }));
+  const signoffByApprovalId = new Map((payload.reviewer_signoffs ?? []).map((signoff) => [signoff.approval_key, signoff]));
+  return approvals.map((approval) => {
+    const approvalId = String(approval.approval_id ?? approval.approvalId ?? "");
+    const signoff = signoffByApprovalId.get(approvalId);
+    return {
+      approvalId,
+      description: String(approval.description ?? "Approval required"),
+      status: String(approval.status ?? "pending"),
+      kind: String(approval.kind ?? approval.approval_type ?? "fill_plan"),
+      actionIds: Array.isArray(approval.action_ids) ? (approval.action_ids as string[]) : [],
+      expiresAt: (approval.expires_at as string | null | undefined) ?? null,
+      proposalId: (approval.proposal_id as string | null | undefined) ?? null,
+      reviewerStatus: signoff?.status ?? null,
+      reviewerEmail: signoff?.reviewer_email ?? null,
+      reviewerNote: signoff?.reviewer_note ?? signoff?.request_note ?? null,
+      clientNote: signoff?.client_note ?? null,
+      signoffId: signoff?.signoff_id ?? null,
+    };
+  });
 }

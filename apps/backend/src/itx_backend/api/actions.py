@@ -10,6 +10,7 @@ from itx_backend.agent.nodes import approval_gate, execute_actions, fill_plan, v
 from itx_backend.security.quarantine import ensure_thread_not_quarantined
 from itx_backend.security.request_auth import require_thread_state
 from itx_backend.services.action_runtime import action_runtime
+from itx_backend.services.review_workspace import review_workspace
 from itx_backend.services.validation_help import translate_validation_errors
 
 router = APIRouter(prefix="/api/actions", tags=["actions"])
@@ -221,9 +222,11 @@ async def validation_help(payload: ValidationHelpRequest) -> dict[str, Any]:
 @router.get("/thread/{thread_id}")
 async def thread_actions(thread_id: str) -> dict[str, Any]:
     state = await require_thread_state(thread_id)
+    activity = await action_runtime.list_thread_activity(thread_id)
     return {
         "thread_id": thread_id,
-        **(await action_runtime.list_thread_activity(thread_id)),
+        **activity,
+        "reviewer_signoffs": await review_workspace.list_signoffs(thread_id),
         "pending_approvals": state.pending_approvals,
         "approved_actions": state.approved_actions,
         "fill_plan": state.fill_plan,

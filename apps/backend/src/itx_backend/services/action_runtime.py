@@ -204,9 +204,21 @@ class ActionRuntimeService:
                 """,
                 uuid.UUID(proposal_id),
             )
+            reviewer_block = await connection.fetchrow(
+                """
+                select 1
+                from reviewer_signoffs rs
+                join approvals a on a.approval_key = rs.approval_key
+                where a.proposal_id = $1 and rs.status <> 'client_approved'
+                limit 1
+                """,
+                uuid.UUID(proposal_id),
+            )
         approved_action_ids = set()
         for row in rows:
             approved_action_ids.update(json.loads(row["action_ids"] or "[]"))
+        if reviewer_block is not None:
+            return False
         return all(action_id in approved_action_ids for action_id in action_ids)
 
     async def record_execution(

@@ -18,6 +18,7 @@ import {
   ValidationHelpItem,
   completeEVerify,
   completeSubmission,
+  counterConsentReviewerSignoff,
   createProposal,
   createRevisionThread,
   decideApproval,
@@ -37,6 +38,7 @@ import {
   prepareReviewHandoff,
   prepareSubmissionApproval,
   recordExecution,
+  requestReviewerSignoff,
   reviewHandoffPackageUrl,
   resumeThreadQuarantine,
   revokeConsent,
@@ -210,6 +212,7 @@ export default function App(): JSX.Element {
   const [submissionStatus, setSubmissionStatus] = useState("draft");
   const [filingArtifacts, setFilingArtifacts] = useState<FilingArtifacts | null>(null);
   const [everification, setEverification] = useState<EverificationRecord | null>(null);
+  const [reviewerEmail, setReviewerEmail] = useState("");
   const [isArchived, setIsArchived] = useState(false);
   const [nextRevisionNumber, setNextRevisionNumber] = useState(1);
   const [isBusy, setIsBusy] = useState(false);
@@ -450,6 +453,15 @@ export default function App(): JSX.Element {
     }
     if (supportAssessment && !supportAssessment.can_autofill) {
       appendMessage(`Execution is paused: ${supportAssessment.reasons[0]?.title ?? "manual review is required"}.`);
+      return;
+    }
+    const blockingReviewer = approvals.find(
+      (approval) => Boolean(approval.signoffId) && approval.reviewerStatus !== "client_approved" && approval.status === "approved"
+    );
+    if (blockingReviewer) {
+      appendMessage(
+        `Execution is waiting for reviewer sign-off on ${blockingReviewer.description.toLowerCase()} and your counter-consent.`
+      );
       return;
     }
 
@@ -892,6 +904,46 @@ export default function App(): JSX.Element {
     }
   };
 
+  const handleRequestReviewerSignoff = async (approvalId: string) => {
+    if (!session) {
+      return;
+    }
+    if (!reviewerEmail.trim()) {
+      appendMessage("Enter a reviewer email before requesting sign-off.");
+      return;
+    }
+    setIsBusy(true);
+    try {
+      const signoff = await requestReviewerSignoff({
+        threadId: session.threadId,
+        approvalId,
+        reviewerEmail: reviewerEmail.trim(),
+      });
+      appendMessage(`Requested reviewer sign-off from ${signoff.reviewer_email}.`);
+      await refreshBackendState(session.threadId);
+    } catch (error: unknown) {
+      appendMessage(`Reviewer sign-off request failed: ${error instanceof Error ? error.message : "unknown error"}`);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const handleCounterConsentReviewer = async (signoffId: string) => {
+    if (!session) {
+      return;
+    }
+    setIsBusy(true);
+    try {
+      await counterConsentReviewerSignoff({ signoffId, approved: true });
+      appendMessage("Reviewer sign-off counter-consent recorded.");
+      await refreshBackendState(session.threadId);
+    } catch (error: unknown) {
+      appendMessage(`Counter-consent failed: ${error instanceof Error ? error.message : "unknown error"}`);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
   const handleOpenReviewHandoff = async (handoffId: string) => {
     if (!session) {
       return;
@@ -994,9 +1046,13 @@ export default function App(): JSX.Element {
         approvedActionCount={approvedActions.length}
         lastExecution={executions[0] ?? null}
         isBusy={isBusy}
+        reviewerEmail={reviewerEmail}
+        onReviewerEmailChange={setReviewerEmail}
         onPreparePage={handlePreparePage}
         onApprove={(approvalId) => void handleApproval(approvalId, true)}
         onReject={(approvalId) => void handleApproval(approvalId, false)}
+        onRequestReviewerSignoff={(approvalId) => void handleRequestReviewerSignoff(approvalId)}
+        onCounterConsentReviewerSignoff={(signoffId) => void handleCounterConsentReviewer(signoffId)}
         onExecute={() => void handleExecute()}
         onUndo={() => void handleUndo()}
       />

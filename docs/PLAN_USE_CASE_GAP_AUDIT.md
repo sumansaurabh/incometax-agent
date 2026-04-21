@@ -90,15 +90,15 @@ The weakest areas are now:
 
 - real document upload, parsing, normalization, and evidence persistence;
 - page adapters and DOM schemas for the portal;
-- broader parser coverage, reviewer workflows, and post-filing features;
-- deeper CA workspace tooling, richer analytics, and inline field evidence;
+- broader parser coverage and post-filing features;
+- deeper CA workspace tooling, bulk export, richer analytics, and inline field evidence;
 - automated tests and CI enforcement.
 
 Bottom line:
 
 - Phase 2-4 core assisted filing is implemented in code with durable persistence.
 - Several Phase 5 trust/safety items are now also implemented in code.
-- The repository still falls short of full roadmap completion because reviewer workflows, broader taxpayer coverage, post-filing features, and CI depth remain open.
+- The repository still falls short of full roadmap completion because broader taxpayer coverage, post-filing features, reviewer workspace depth, and CI depth remain open.
 
 ## Phase-Level Verdict
 
@@ -109,7 +109,7 @@ Bottom line:
 | Phase 2 - Document Intelligence | Implemented-in-code | Postgres-backed documents, storage, queueing, extraction, normalization, evidence persistence, and reconciliation are implemented; broader fixture-bank accuracy gates remain to be expanded. |
 | Phase 3 - Guided Autofill | Implemented-in-code | Durable proposal/approval/execution persistence, live sidepanel approvals, browser execution/readback, and undo are implemented and validated in tests/typecheck. |
 | Phase 4 - Completion Flow | Implemented-in-code | Submission summary, consent ledger, artifact archive, e-verification handoff, and revision branching now have persistence, APIs, and sidepanel flow; live demo-account exit criteria remain unverified. |
-| Phase 5 - Scale And Hardening | Partial | Replay, drift telemetry, offline export, retention purge, trust boundaries, validation-help, unsupported-flow downgrade, prompt-injection screening, and anomaly quarantine exist; reviewer workflow depth, dashboards, and broader operational hardening remain incomplete. |
+| Phase 5 - Scale And Hardening | Partial | Replay, drift telemetry, offline export, retention purge, trust boundaries, validation-help, unsupported-flow downgrade, prompt-injection screening, anomaly quarantine, and reviewer sign-off flows exist; dashboards, bulk workspace operations, and broader operational hardening remain incomplete. |
 
 ## Exit-Criteria Check
 
@@ -265,7 +265,7 @@ Summary:
 ### I. CA Or Reviewer Workspace
 
 57. Partial - Multi-client list: CA API can enumerate thread summaries, but there is no real dashboard workflow.
-58. Missing - Reviewer sign-off: no dual-approval or reviewer authorization flow exists.
+58. Implemented-in-code - Reviewer sign-off: owners can request reviewer sign-off for an approval, reviewers gain scoped access to the shared thread, reviewer decisions are persisted, and execution stays blocked until client counter-consent is recorded.
 59. Missing - Bulk export: not implemented.
 
 ### J. Compliance, Safety, Trust
@@ -291,17 +291,16 @@ This section consolidates what is still genuinely pending after the recent Phase
 
 ### 1. Auth, Session, And Trust Boundaries
 
-- Device-bound auth, refresh, revocation, and browser-session binding.
+- Strengthen extension-side cryptography beyond the current lightweight storage approach.
 - Consent-first onboarding UX for upload/fill/regime-compare/reviewer-share purposes.
-- Verified-host badge, lookalike-domain detection, and redirect suspension.
-- Stronger extension-side cryptography than the current lightweight storage approach.
+- Expand trust copy and guided recovery around verified, lookalike, and unsupported portal states.
 
 ### 2. Portal Awareness And Adapter Depth
 
 - Finish non-empty adapter schemas for all supported pages.
 - Move more detection/schema extraction away from title/URL heuristics and toward DOM-driven logic.
-- Translate portal validation errors into targeted recovery guidance.
-- Add explicit unsupported-flow downgrade and CA handoff behavior.
+- Extend targeted validation guidance beyond the currently covered high-friction pages.
+- Expand unsupported-flow downgrade coverage across more portal branches.
 
 ### 3. Document Intelligence Quality
 
@@ -313,7 +312,6 @@ This section consolidates what is still genuinely pending after the recent Phase
 ### 4. Rules And Reasoning Breadth
 
 - Expand ITR eligibility, required-schedule detection, residential-status rules, deduction caps, and presumptive-taxation support.
-- Add regime-switch impact preview UX before committing changes.
 - Improve disclosure checks and unsupported-case escalation coverage.
 
 ### 5. Browser Execution Hardening
@@ -332,15 +330,13 @@ This section consolidates what is still genuinely pending after the recent Phase
 ### 7. CA / Reviewer Workspace
 
 - Build an actual reviewer dashboard UI on top of the current list/detail APIs.
-- Add reviewer sign-off, dual-approval, and client counter-consent.
 - Add bulk export for clients.
 
 ### 8. Compliance, Retention, And Security Response
 
-- Consent revocation flow using the existing schema support.
-- Retention-driven purge of uploads and raw artifacts.
-- Stronger anomaly response than passive observation.
-- Real document prompt-injection defenses instead of minimal sanitization.
+- Package audit and purge evidence into operator-friendly exports and dashboards.
+- Deepen anomaly investigation tooling beyond quarantine and manual resume.
+- Expand document-security policy coverage and reviewer triage for medium-risk cases.
 
 ### 9. Testing, Analytics, And Operability
 
@@ -353,30 +349,26 @@ This section consolidates what is still genuinely pending after the recent Phase
 
 This plan focuses only on the work that remains after the current Phase 2-4 implementation.
 
-1. Replace the dev-token auth stub with device-bound auth, refresh, and revocation.
+1. Strengthen extension-side cryptography around stored auth and session material.
 2. Add a consent-first onboarding flow for upload, fill, regime-compare, and reviewer-share purposes.
-3. Add verified-host UI, lookalike-domain warnings, and redirect suspension in the extension.
+3. Expand verified-host, lookalike, and unsupported-host recovery UX in the extension.
 4. Complete adapter schemas for all supported pages and remove remaining empty schemas.
 5. Make page detection and required-input discovery more DOM-driven and less title/URL-dependent.
-6. Translate portal validation errors into actionable recovery guidance.
+6. Extend translated portal validation recovery guidance across more pages and error shapes.
 7. Broaden parser coverage and accuracy for TIS, salary slips, rent receipts, home-loan certificates, ELSS/PPF proofs, and broker statements.
 8. Improve OCR quality and validation coverage in the document pipeline.
 9. Expand rules-core for residential status, richer deduction caps, fuller ITR eligibility, and presumptive-taxation reasoning.
-10. Add regime-switch impact preview before the user approves a change.
+10. Expand unsupported-flow downgrade and CA handoff coverage across more portal branches.
 11. Harden selector-drift recovery and persist learned mappings in an operationally useful way.
 12. Add inline evidence traceability on filled portal fields.
 13. Replace the placeholder ITR-V archive with the official filed artifact where available.
 14. Implement ITR-U support with explicit escalation gates.
 15. Add year-over-year comparison, next-AY readiness, notice-response prep, and refund-status tracking.
 16. Build a real CA/reviewer dashboard UI.
-17. Add reviewer sign-off, dual approval, and client counter-consent.
-18. Add bulk export for CA/reviewer workflows.
-19. Implement consent revocation and retention-driven purge jobs.
-20. Strengthen anomaly response from passive detection to active pause/quarantine.
-21. Add meaningful document prompt-injection defenses beyond null-byte stripping.
-22. Expand backend, worker, extension, and replay-based automated tests.
-23. Add extraction-accuracy dashboards by parser version and document type.
-24. Remove remaining CI masking so lint, test, and replay regressions fail fast.
+17. Add bulk export for CA/reviewer workflows.
+18. Expand backend, worker, extension, and replay-based automated tests.
+19. Add extraction-accuracy dashboards by parser version and document type.
+20. Remove remaining CI masking so lint, test, and replay regressions fail fast.
 
 ## Practical Conclusion
 
@@ -388,4 +380,4 @@ The most accurate description is:
 
 - a solid Phase 2-4 assisted-filing path exists in code;
 - many supporting and Phase 5 use cases are still only partial;
-- production auth, reviewer workflows, post-filing features, retention/revocation, and broader quality hardening remain open.
+- post-filing features, richer reviewer workspace UX, and broader quality hardening remain open.
