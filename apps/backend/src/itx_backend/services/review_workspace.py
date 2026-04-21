@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import uuid
+import zipfile
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -33,6 +35,15 @@ def _truthy(value: Any) -> bool:
     if isinstance(value, (list, tuple, set, dict)):
         return len(value) > 0
     return bool(value)
+
+
+def _json_safe(value: Any) -> Any:
+    return json.loads(json.dumps(value, default=str))
+
+
+def _archive_member_name(storage_uri: str, prefix: str) -> str:
+    filename = storage_uri.split("/")[-1]
+    return f"{prefix}/{filename}"
 
 
 def assess_agent_state(state: AgentState, activity: Optional[dict[str, Any]] = None) -> dict[str, Any]:
@@ -322,6 +333,51 @@ class ReviewWorkspaceService:
         assessment["handoffs"] = await self.list_handoffs(thread_id)
         assessment["reviewer_signoffs"] = await self.list_signoffs(thread_id)
         return assessment
+
+    async def build_client_export_bundle(
+        self,
+        *,
+        thread_id: str,
+        user_id: str,
+        email: str,
+    ) -> tuple[bytes, str]:
+        state, access_role = await self.get_accessible_state(thread_id=thread_id, user_id=user_id, email=email)
+        payload = await self._build_export_payload(state=state, access_role=access_role)
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        filename = f"client-export-{thread_id}-{timestamp}.zip"
+        return self._render_export_archive(payloads=[payload], export_scope="single", filename=filename)
+
+    async def build_bulk_export_bundle(
+        self,
+        *,
+        user_id: str,
+        email: str,
+        thread_ids: Optional[list[str]] = None,
+    ) -> tuple[bytes, str]:
+        accessible_states = await self.list_accessible_states(user_id=user_id, email=email)
+        accessible_map = {state.thread_id: (state, access_role) for state, access_role in accessible_states}
+
+        if thread_ids:
+            missing = [thread_id for thread_id in thread_ids if thread_id not in accessible_map]
+            if missing:
+                raise PermissionError(
+                    f"export_threads_forbidden:{','.join(sorted(dict.fromkeys(missing)))}"
+                )
+            selected_thread_ids = list(dict.fromkeys(thread_ids))
+        else:
+            selected_thread_ids = [state.thread_id for state, _ in accessible_states]
+
+        if not selected_thread_ids:
+            raise ValueError("no_accessible_threads")
+
+        payloads: list[dict[str, Any]] = []
+        for thread_id in selected_thread_ids:
+            state, access_role = accessible_map[thread_id]
+            payloads.append(await self._build_export_payload(state=state, access_role=access_role))
+
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        filename = f"review-workspace-export-{timestamp}.zip"
+        return self._render_export_archive(payloads=payloads, export_scope="bulk", filename=filename)
 
     async def prepare_handoff(
         self,
@@ -697,6 +753,124 @@ class ReviewWorkspaceService:
             raise KeyError(handoff_id)
         content = document_storage.read(str(storage_uri))
         return content, "application/json", str(storage_uri).split("/")[-1]
+
+    async def _build_export_payload(self, *, state: AgentState, access_role: str) -> dict[str, Any]:
+        thread_id = state.thread_id
+        activity = await action_runtime.list_thread_activity(thread_id)
+        support_assessment = assess_agent_state(state, activity)
+        handoffs = await self.list_handoffs(thread_id)
+        signoffs = await self.list_signoffs(thread_id)
+        shares = await self.list_access_grants(thread_id=thread_id)
+        filing_state = {
+            "submission_summary": await filing_runtime.latest_submission_summary(thread_id),
+            "artifacts": await filing_runtime.latest_artifacts(thread_id),
+            "everification": await filing_runtime.latest_everification(thread_id),
+            "revision": await filing_runtime.latest_revision(thread_id),
+            "consents": await filing_runtime.list_consents(thread_id),
+            "year_over_year": await filing_runtime.latest_year_over_year(thread_id),
+            "next_ay_checklist": await filing_runtime.latest_next_ay_checklist(thread_id),
+            "notices": await filing_runtime.list_notice_preparations(thread_id),
+            "refund_status": await filing_runtime.latest_refund_status(thread_id),
+        }
+
+        assets: list[dict[str, str]] = []
+        artifacts = filing_state.get("artifacts") or {}
+        for storage_uri in [
+            artifacts.get("summary_storage_uri"),
+            artifacts.get("json_export_uri"),
+            artifacts.get("evidence_bundle_uri"),
+            artifacts.get("itr_v_storage_uri"),
+        ]:
+            if storage_uri:
+                assets.append(
+                    {
+                        "storage_uri": str(storage_uri),
+                        "archive_path": _archive_member_name(str(storage_uri), "artifacts"),
+                        "kind": "filing_artifact",
+                    }
+                )
+
+        for handoff in handoffs:
+            storage_uri = handoff.get("package_storage_uri")
+            if storage_uri:
+                assets.append(
+                    {
+                        "storage_uri": str(storage_uri),
+                        "archive_path": _archive_member_name(str(storage_uri), "handoffs"),
+                        "kind": "handoff_package",
+                    }
+                )
+
+        return {
+            "thread_id": thread_id,
+            "access_role": access_role,
+            "exported_at": datetime.now(timezone.utc).isoformat(),
+            "taxpayer": {
+                "name": (state.tax_facts or {}).get("name"),
+                "pan": (state.tax_facts or {}).get("pan"),
+            },
+            "itr_type": state.itr_type,
+            "submission_status": state.submission_status,
+            "support_assessment": support_assessment,
+            "documents": _json_safe(state.documents),
+            "rejected_documents": _json_safe(state.rejected_documents),
+            "tax_facts": _json_safe(state.tax_facts),
+            "fact_evidence": _json_safe(state.fact_evidence),
+            "reconciliation": _json_safe(state.reconciliation),
+            "pending_approvals": _json_safe(state.pending_approvals),
+            "messages": _json_safe(state.messages[-25:]),
+            "actions": _json_safe(activity),
+            "handoffs": _json_safe(handoffs),
+            "reviewer_signoffs": _json_safe(signoffs),
+            "shares": _json_safe(shares),
+            "filing_state": _json_safe(filing_state),
+            "included_assets": assets,
+        }
+
+    def _render_export_archive(
+        self,
+        *,
+        payloads: list[dict[str, Any]],
+        export_scope: str,
+        filename: str,
+    ) -> tuple[bytes, str]:
+        created_at = datetime.now(timezone.utc).isoformat()
+        manifest = {
+            "created_at": created_at,
+            "scope": export_scope,
+            "thread_count": len(payloads),
+            "threads": [payload["thread_id"] for payload in payloads],
+            "missing_assets": [],
+        }
+
+        archive_bytes = io.BytesIO()
+        with zipfile.ZipFile(archive_bytes, mode="w", compression=zipfile.ZIP_DEFLATED) as bundle:
+            for payload in payloads:
+                thread_prefix = payload["thread_id"]
+                bundle.writestr(
+                    f"{thread_prefix}/client-summary.json",
+                    json.dumps(payload, sort_keys=True, indent=2),
+                )
+                for asset in payload.get("included_assets", []):
+                    storage_uri = asset.get("storage_uri")
+                    archive_path = asset.get("archive_path")
+                    if not storage_uri or not archive_path:
+                        continue
+                    try:
+                        content = document_storage.read(storage_uri)
+                    except FileNotFoundError:
+                        manifest["missing_assets"].append(
+                            {
+                                "thread_id": payload["thread_id"],
+                                "storage_uri": storage_uri,
+                                "archive_path": archive_path,
+                            }
+                        )
+                        continue
+                    bundle.writestr(f"{thread_prefix}/{archive_path}", content)
+            bundle.writestr("export-manifest.json", json.dumps(manifest, sort_keys=True, indent=2))
+
+        return archive_bytes.getvalue(), filename
 
     def _serialize_handoff(self, row: Record) -> dict[str, Any]:
         return {

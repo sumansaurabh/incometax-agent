@@ -1,17 +1,24 @@
 from __future__ import annotations
 
+import io
 import os
 import unittest
+import zipfile
 
 from itx_backend.agent.checkpointer import checkpointer
 from itx_backend.agent.state import AgentState
 from itx_backend.api.actions import ActionDecision, ActionExecutionRequest, ProposalRequest, decision, execute, proposal, thread_actions
 from itx_backend.api.ca_workspace import (
+    BulkExportRequest,
     CounterConsentRequest,
+    PrepareHandoffRequest,
     ReviewerDecisionRequest,
     ReviewerSignoffRequest,
     client_detail,
     clients,
+    download_bulk_export,
+    download_client_export,
+    prepare_handoff,
     request_reviewer_signoff,
     reviewer_counter_consent,
     reviewer_decision,
@@ -19,6 +26,7 @@ from itx_backend.api.ca_workspace import (
 from itx_backend.db.session import close_connection_pool, get_pool, init_connection_pool
 from itx_backend.security.request_auth import reset_request_auth, set_request_auth
 from itx_backend.services.auth_runtime import AuthContext
+from itx_backend.services.filing_runtime import filing_runtime
 
 
 @unittest.skipUnless(os.getenv("ITX_DATABASE_URL"), "ITX_DATABASE_URL required for Postgres tests")
@@ -42,14 +50,14 @@ class ReviewerWorkflowApiTest(unittest.IsolatedAsyncioTestCase):
         pool = await get_pool()
         async with pool.acquire() as connection:
             await connection.execute(
-                "truncate table reviewer_signoffs, review_access_grants, consents, approvals, action_executions, action_proposals, field_fill_history, validation_errors, filing_audit_trail, agent_checkpoints cascade"
+                "truncate table refund_status_snapshots, notice_response_preparations, next_ay_checklists, year_over_year_comparisons, reviewer_signoffs, review_handoffs, review_access_grants, revision_threads, everification_status, filed_return_artifacts, consents, submission_summaries, approvals, action_executions, action_proposals, field_fill_history, validation_errors, filing_audit_trail, agent_checkpoints cascade"
             )
 
     async def asyncTearDown(self) -> None:
         pool = await get_pool()
         async with pool.acquire() as connection:
             await connection.execute(
-                "truncate table reviewer_signoffs, review_access_grants, consents, approvals, action_executions, action_proposals, field_fill_history, validation_errors, filing_audit_trail, agent_checkpoints cascade"
+                "truncate table refund_status_snapshots, notice_response_preparations, next_ay_checklists, year_over_year_comparisons, reviewer_signoffs, review_handoffs, review_access_grants, revision_threads, everification_status, filed_return_artifacts, consents, submission_summaries, approvals, action_executions, action_proposals, field_fill_history, validation_errors, filing_audit_trail, agent_checkpoints cascade"
             )
         if self._auth_token is not None:
             reset_request_auth(self._auth_token)
@@ -151,6 +159,89 @@ class ReviewerWorkflowApiTest(unittest.IsolatedAsyncioTestCase):
                 thread_id,
             )
         self.assertEqual(consent_count, 1)
+
+    async def test_bulk_export_packages_client_state_artifacts_and_handoffs(self) -> None:
+        owner_user_id = "owner-export"
+        thread_id = "thread-reviewer-export"
+
+        self._bind_auth(owner_user_id, "owner-export@example.com")
+        state = AgentState(
+            thread_id=thread_id,
+            user_id=owner_user_id,
+            current_page="submission-summary",
+            itr_type="ITR-1",
+            tax_facts={
+                "assessment_year": "2025-26",
+                "pan": "ABCDE1234F",
+                "name": "Export Test User",
+                "gross_salary": 920000,
+            },
+            fact_evidence={
+                "gross_salary": [{"document_type": "form16", "document_id": "doc-form16-1"}],
+            },
+            documents=[
+                {
+                    "id": "doc-form16-1",
+                    "name": "form16.pdf",
+                    "type": "form16",
+                    "status": "processed",
+                }
+            ],
+            submission_summary={
+                "assessment_year": "2025-26",
+                "itr_type": "ITR-1",
+                "tax_payable": 0,
+                "refund_due": 3200,
+                "blocking_issues": [],
+                "can_submit": True,
+            },
+            submission_status="submitted",
+        )
+        await checkpointer.save(state)
+
+        await filing_runtime.archive_submission_artifacts(
+            thread_id=thread_id,
+            assessment_year="2025-26",
+            itr_type="ITR-1",
+            tax_facts=state.tax_facts,
+            fact_evidence=state.fact_evidence,
+            reconciliation={},
+            submission_summary=state.submission_summary,
+            summary_markdown="# Submission Summary\n\nExport test submission.",
+            ack_no="ACK-EXPORT-1",
+            portal_ref="PORTAL-EXPORT-1",
+            filed_at="2025-07-31T10:30:00+00:00",
+            itrv_text="Official ITR-V placeholder for export validation.",
+        )
+
+        handoff = await prepare_handoff(PrepareHandoffRequest(thread_id=thread_id))
+
+        single_response = await download_client_export(thread_id)
+        self.assertEqual(single_response.media_type, "application/zip")
+
+        single_bundle = zipfile.ZipFile(io.BytesIO(single_response.body))
+        single_names = set(single_bundle.namelist())
+        self.assertIn("export-manifest.json", single_names)
+        self.assertIn(f"{thread_id}/client-summary.json", single_names)
+        self.assertIn(f"{thread_id}/artifacts/submission-summary.md", single_names)
+        self.assertIn(f"{thread_id}/handoffs/{handoff['handoff_id']}.json", single_names)
+
+        summary_payload = single_bundle.read(f"{thread_id}/client-summary.json").decode("utf-8")
+        self.assertIn("Export Test User", summary_payload)
+        self.assertIn("ACK-EXPORT-1", summary_payload)
+
+        bulk_response = await download_bulk_export(BulkExportRequest(thread_ids=[thread_id]))
+        self.assertEqual(bulk_response.media_type, "application/zip")
+
+        bulk_bundle = zipfile.ZipFile(io.BytesIO(bulk_response.body))
+        bulk_names = set(bulk_bundle.namelist())
+        self.assertIn("export-manifest.json", bulk_names)
+        self.assertIn(f"{thread_id}/artifacts/offline-export.json", bulk_names)
+        self.assertIn(f"{thread_id}/artifacts/evidence-bundle.json", bulk_names)
+        self.assertIn(f"{thread_id}/artifacts/itr-v.txt", bulk_names)
+
+        manifest_payload = bulk_bundle.read("export-manifest.json").decode("utf-8")
+        self.assertIn(thread_id, manifest_payload)
 
 
 if __name__ == "__main__":

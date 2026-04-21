@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Optional
 
 from fastapi import HTTPException
 
@@ -29,7 +29,7 @@ def ensure_thread_not_quarantined(state: AgentState, action: str) -> None:
         raise HTTPException(status_code=423, detail=f"thread_quarantined:{action}")
 
 
-async def quarantine_thread(thread_id: str, *, requested_by: str, reason: str, details: dict[str, Any] | None = None) -> dict[str, Any]:
+async def quarantine_thread(thread_id: str, *, requested_by: str, reason: str, details: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     state = await checkpointer.latest(thread_id)
     if state is None:
         raise KeyError(thread_id)
@@ -53,7 +53,7 @@ async def quarantine_thread(thread_id: str, *, requested_by: str, reason: str, d
     return status
 
 
-async def resume_thread(thread_id: str, *, requested_by: str, note: str | None = None) -> dict[str, Any]:
+async def resume_thread(thread_id: str, *, requested_by: str, note: Optional[str] = None) -> dict[str, Any]:
     state = await checkpointer.latest(thread_id)
     if state is None:
         raise KeyError(thread_id)

@@ -174,6 +174,92 @@ export type EverificationRecord = {
   verified_at?: string | null;
 };
 
+export type YearOverYearDelta = {
+  current: number;
+  prior: number;
+  delta: number;
+};
+
+export type YearOverYearComparison = {
+  thread_id: string;
+  current_assessment_year?: string | null;
+  prior_thread_id?: string | null;
+  prior_assessment_year?: string | null;
+  regime: {
+    current: string;
+    prior?: string | null;
+    changed: boolean;
+  };
+  metrics: Record<string, YearOverYearDelta>;
+  deductions: Record<string, YearOverYearDelta>;
+  highlights: string[];
+};
+
+export type YearOverYearRecord = {
+  record_id: string;
+  thread_id: string;
+  user_id: string;
+  current_assessment_year?: string | null;
+  prior_thread_id?: string | null;
+  prior_assessment_year?: string | null;
+  comparison: YearOverYearComparison;
+  created_at?: string | null;
+};
+
+export type NextAyChecklistItem = {
+  code: string;
+  title: string;
+  reason: string;
+  category: string;
+  priority: string;
+  due_by: string;
+  recommended_documents: string[];
+  status: string;
+};
+
+export type NextAyChecklistRecord = {
+  record_id: string;
+  thread_id: string;
+  user_id: string;
+  current_assessment_year?: string | null;
+  target_assessment_year: string;
+  items: NextAyChecklistItem[];
+  summary: Record<string, unknown>;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export type NoticePreparationRecord = {
+  record_id: string;
+  thread_id: string;
+  user_id: string;
+  notice_type: string;
+  assessment_year?: string | null;
+  source_storage_uri?: string | null;
+  extracted: Record<string, unknown>;
+  explanation_md: string;
+  suggested_response: Record<string, unknown>;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export type RefundStatusRecord = {
+  record_id: string;
+  thread_id: string;
+  user_id: string;
+  assessment_year?: string | null;
+  status: string;
+  refund_amount?: number | null;
+  portal_ref?: string | null;
+  issued_at?: string | null;
+  processed_at?: string | null;
+  refund_mode?: string | null;
+  bank_masked?: string | null;
+  source: string;
+  observation: Record<string, unknown>;
+  observed_at?: string | null;
+};
+
 export type FilingStateResponse = {
   thread_id: string;
   submission_status: string;
@@ -187,6 +273,10 @@ export type FilingStateResponse = {
   consents: Array<Record<string, unknown>>;
   purge_jobs: Array<Record<string, unknown>>;
   revision: Record<string, unknown> | null;
+  year_over_year: YearOverYearRecord | null;
+  next_ay_checklist: NextAyChecklistRecord | null;
+  notices: NoticePreparationRecord[];
+  refund_status: RefundStatusRecord | null;
   archived: boolean;
 };
 
@@ -538,6 +628,100 @@ export async function undoExecution(input: {
 
 export async function fetchFilingState(threadId: string): Promise<FilingStateResponse> {
   return request<FilingStateResponse>(`/api/filing/${threadId}`);
+}
+
+export async function generateYearOverYearComparison(threadId: string): Promise<YearOverYearRecord> {
+  return request("/api/filing/year-over-year", {
+    method: "POST",
+    body: JSON.stringify({ thread_id: threadId }),
+  });
+}
+
+export async function generateNextAyChecklist(threadId: string): Promise<NextAyChecklistRecord> {
+  return request("/api/filing/next-ay-checklist", {
+    method: "POST",
+    body: JSON.stringify({ thread_id: threadId }),
+  });
+}
+
+export async function prepareNoticeResponse(input: {
+  threadId: string;
+  noticeText: string;
+  noticeType?: string;
+}): Promise<NoticePreparationRecord> {
+  return request("/api/filing/notices/prepare", {
+    method: "POST",
+    body: JSON.stringify({
+      thread_id: input.threadId,
+      notice_text: input.noticeText,
+      notice_type: input.noticeType ?? "143(1)",
+    }),
+  });
+}
+
+export async function captureRefundStatus(input: {
+  threadId: string;
+  pageType?: string | null;
+  pageTitle?: string | null;
+  pageUrl?: string | null;
+  portalState?: PortalState | null;
+  manualStatus?: string | null;
+  manualPortalRef?: string | null;
+  manualRefundAmount?: string | number | null;
+  manualIssuedAt?: string | null;
+  manualProcessedAt?: string | null;
+  manualRefundMode?: string | null;
+  manualBankMasked?: string | null;
+}): Promise<RefundStatusRecord> {
+  return request("/api/filing/refund-status/capture", {
+    method: "POST",
+    body: JSON.stringify({
+      thread_id: input.threadId,
+      page_type: input.pageType ?? null,
+      page_title: input.pageTitle ?? null,
+      page_url: input.pageUrl ?? null,
+      portal_state: input.portalState ?? null,
+      manual_status: input.manualStatus ?? null,
+      manual_portal_ref: input.manualPortalRef ?? null,
+      manual_refund_amount: input.manualRefundAmount ?? null,
+      manual_issued_at: input.manualIssuedAt ?? null,
+      manual_processed_at: input.manualProcessedAt ?? null,
+      manual_refund_mode: input.manualRefundMode ?? null,
+      manual_bank_masked: input.manualBankMasked ?? null,
+    }),
+  });
+}
+
+export async function attachOfficialArtifact(input: {
+  threadId: string;
+  artifactKind?: string;
+  pageType?: string | null;
+  pageTitle?: string | null;
+  pageUrl?: string | null;
+  portalState?: PortalState | null;
+  manualText?: string | null;
+  ackNo?: string | null;
+  portalRef?: string | null;
+  filedAt?: string | null;
+}): Promise<{
+  artifacts: FilingArtifacts;
+  official_artifact: Record<string, unknown>;
+}> {
+  return request("/api/filing/artifacts/official", {
+    method: "POST",
+    body: JSON.stringify({
+      thread_id: input.threadId,
+      artifact_kind: input.artifactKind ?? "itr_v",
+      page_type: input.pageType ?? null,
+      page_title: input.pageTitle ?? null,
+      page_url: input.pageUrl ?? null,
+      portal_state: input.portalState ?? null,
+      manual_text: input.manualText ?? null,
+      ack_no: input.ackNo ?? null,
+      portal_ref: input.portalRef ?? null,
+      filed_at: input.filedAt ?? null,
+    }),
+  });
 }
 
 export async function generateSubmissionSummary(input: {

@@ -15,19 +15,29 @@ from itx_backend.api.filing import (
     EVerifyPrepareRequest,
     EVerifyStartRequest,
     FilingSummaryRequest,
+    OfficialArtifactAttachmentRequest,
+    RefundStatusCaptureRequest,
     RevisionCreateRequest,
+    NextAyChecklistRequest,
+    NoticePreparationRequest,
+    YearOverYearRequest,
+    attach_official_artifact,
     SubmitPrepareRequest,
+    capture_refund_status,
     complete_everify,
     complete_submit,
     create_revision,
     filing_state,
     generate_summary,
+    next_ay_checklist,
+    prepare_notice,
     prepare_everify,
     prepare_submit,
     regime_preview,
     RegimePreviewRequest,
     revoke_consent,
     start_everify,
+    year_over_year,
 )
 from itx_backend.db.session import close_connection_pool, get_pool, init_connection_pool
 from itx_backend.security.request_auth import reset_request_auth, set_request_auth
@@ -58,14 +68,14 @@ class FilingApiTest(unittest.IsolatedAsyncioTestCase):
         pool = await get_pool()
         async with pool.acquire() as connection:
             await connection.execute(
-                "truncate table revision_threads, filed_return_artifacts, everification_status, submission_summaries, draft_returns, consents, approvals, action_proposals, action_executions, field_fill_history, validation_errors, filing_audit_trail, agent_checkpoints cascade"
+                "truncate table refund_status_snapshots, notice_response_preparations, next_ay_checklists, year_over_year_comparisons, revision_threads, filed_return_artifacts, everification_status, submission_summaries, draft_returns, consents, approvals, action_proposals, action_executions, field_fill_history, validation_errors, filing_audit_trail, agent_checkpoints cascade"
             )
 
     async def asyncTearDown(self) -> None:
         pool = await get_pool()
         async with pool.acquire() as connection:
             await connection.execute(
-                "truncate table purge_jobs, revision_threads, filed_return_artifacts, everification_status, submission_summaries, draft_returns, consents, approvals, action_proposals, action_executions, field_fill_history, validation_errors, filing_audit_trail, agent_checkpoints cascade"
+                "truncate table purge_jobs, refund_status_snapshots, notice_response_preparations, next_ay_checklists, year_over_year_comparisons, revision_threads, filed_return_artifacts, everification_status, submission_summaries, draft_returns, consents, approvals, action_proposals, action_executions, field_fill_history, validation_errors, filing_audit_trail, agent_checkpoints cascade"
             )
         if self._auth_token is not None:
             reset_request_auth(self._auth_token)
@@ -113,6 +123,28 @@ class FilingApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(submitted["submission_status"], "submitted")
         self.assertEqual(submitted["artifacts"]["ack_no"], "ACK-12345")
 
+        official_artifact = await attach_official_artifact(
+            OfficialArtifactAttachmentRequest(
+                thread_id="thread-filing-1",
+                page_type="filing-acknowledgement",
+                page_title="Return filed successfully",
+                page_url="https://www.incometax.gov.in/return-filed",
+                portal_state={
+                    "fields": {
+                        "#ackNo": {"value": "ACK-12345", "fieldKey": "ack_no", "label": "Acknowledgement Number"},
+                        "#filingDate": {"value": "2025-07-31T10:30:00+00:00", "fieldKey": "filed_at", "label": "Date of Filing"},
+                    }
+                },
+                manual_text="Official portal acknowledgement for filed return ACK-12345.",
+            )
+        )
+        self.assertEqual(official_artifact["artifacts"]["ack_no"], "ACK-12345")
+        self.assertTrue(str(official_artifact["artifacts"]["itr_v_storage_uri"]).endswith("official-itr-v.md"))
+        self.assertIn(
+            "Official portal acknowledgement",
+            document_storage.read(str(official_artifact["artifacts"]["itr_v_storage_uri"])).decode("utf-8"),
+        )
+
         prepared_everify = await prepare_everify(
             EVerifyPrepareRequest(thread_id="thread-filing-1", method="aadhaar_otp")
         )
@@ -135,6 +167,7 @@ class FilingApiTest(unittest.IsolatedAsyncioTestCase):
         filing = await filing_state("thread-filing-1")
         self.assertEqual(filing["submission_status"], "verified")
         self.assertEqual(filing["artifacts"]["ack_no"], "ACK-12345")
+        self.assertTrue(str((filing["artifacts"].get("artifact_manifest") or {}).get("official_itr_v_storage_uri", "")).endswith("official-itr-v.md"))
         self.assertEqual(len(filing["consents"]), 2)
         self.assertEqual(filing["everification"]["status"], "completed")
         self.assertIsNotNone(filing["summary_record"])
@@ -219,3 +252,114 @@ class FilingApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("old_regime", preview)
         self.assertIn("new_regime", preview)
         self.assertIsInstance(preview["rationale"], list)
+
+    async def test_post_filing_features_persist_and_surface_in_filing_state(self) -> None:
+        self._bind_auth("user-4")
+        await checkpointer.save(
+            AgentState(
+                thread_id="thread-filing-prior",
+                user_id="user-4",
+                itr_type="ITR-1",
+                tax_facts={
+                    "assessment_year": "2024-25",
+                    "regime": "old",
+                    "salary": {"gross": 1200000},
+                    "deductions": {"80c": 120000, "80d": 15000},
+                },
+                submission_summary={
+                    "assessment_year": "2024-25",
+                    "itr_type": "ITR-1",
+                    "regime": "old",
+                    "gross_total_income": 1200000,
+                    "total_deductions": 135000,
+                    "taxable_income": 1065000,
+                    "net_tax_liability": 92000,
+                    "total_tax_paid": 95000,
+                    "tax_payable": 0,
+                    "refund_due": 3000,
+                    "mismatch_count": 0,
+                    "can_submit": True,
+                    "blocking_issues": [],
+                },
+                submission_status="verified",
+                filing_artifacts={"ack_no": "ACK-PRIOR"},
+            )
+        )
+        await checkpointer.save(
+            AgentState(
+                thread_id="thread-filing-4",
+                user_id="user-4",
+                itr_type="ITR-1",
+                tax_facts={
+                    "assessment_year": "2025-26",
+                    "name": "Carol Example",
+                    "pan": "ABCDE1234H",
+                    "regime": "new",
+                    "salary": {"gross": 1500000},
+                    "deductions": {"80c": 150000, "80d": 25000},
+                    "tax_paid": {"tds_salary": 140000},
+                    "exemptions": {"hra": 90000},
+                    "bank": {"account_number": "1234567890", "ifsc": "HDFC0001234"},
+                },
+                reconciliation={"mismatches": []},
+            )
+        )
+
+        summary = await generate_summary(FilingSummaryRequest(thread_id="thread-filing-4"))
+        self.assertTrue(summary["submission_summary"]["gross_total_income"] > 0)
+
+        comparison = await year_over_year(YearOverYearRequest(thread_id="thread-filing-4"))
+        self.assertEqual(comparison["prior_assessment_year"], "2024-25")
+        self.assertTrue(comparison["comparison"]["metrics"]["gross_total_income"]["delta"] > 0)
+
+        checklist = await next_ay_checklist(NextAyChecklistRequest(thread_id="thread-filing-4"))
+        self.assertEqual(checklist["target_assessment_year"], "2026-27")
+        self.assertGreaterEqual(len(checklist["items"]), 4)
+
+        notice = await prepare_notice(
+            NoticePreparationRequest(
+                thread_id="thread-filing-4",
+                notice_type="143(1)",
+                notice_text=(
+                    "Intimation u/s 143(1)\n"
+                    "Assessment Year: 2025-26\n"
+                    "DIN: DIN-12345\n"
+                    "Demand payable: INR 4500\n"
+                    "Adjustment: TDS mismatch with Form 16\n"
+                    "Response due by: 31/08/2026"
+                ),
+            )
+        )
+        self.assertEqual(notice["notice_type"], "143(1)")
+        self.assertIn("TDS mismatch", " ".join(notice["extracted"]["adjustments"]))
+
+        refund = await capture_refund_status(
+            RefundStatusCaptureRequest(
+                thread_id="thread-filing-4",
+                manual_status="Refund credited",
+                manual_portal_ref="REF-2026-1",
+                manual_refund_amount=3200,
+                manual_refund_mode="NEFT",
+                manual_bank_masked="XXXX6789",
+            )
+        )
+        self.assertEqual(refund["status"], "Refund credited")
+        self.assertEqual(refund["source"], "manual")
+
+        filing = await filing_state("thread-filing-4")
+        self.assertIsNotNone(filing["year_over_year"])
+        self.assertIsNotNone(filing["next_ay_checklist"])
+        self.assertEqual(len(filing["notices"]), 1)
+        self.assertEqual(filing["refund_status"]["portal_ref"], "REF-2026-1")
+
+        pool = await get_pool()
+        async with pool.acquire() as connection:
+            yoy_count = await connection.fetchval("select count(*) from year_over_year_comparisons where thread_id = $1", "thread-filing-4")
+            checklist_count = await connection.fetchval("select count(*) from next_ay_checklists where thread_id = $1", "thread-filing-4")
+            notice_count = await connection.fetchval("select count(*) from notice_response_preparations where thread_id = $1", "thread-filing-4")
+            refund_count = await connection.fetchval("select count(*) from refund_status_snapshots where thread_id = $1", "thread-filing-4")
+
+        self.assertEqual(yoy_count, 1)
+        self.assertEqual(checklist_count, 1)
+        self.assertEqual(notice_count, 1)
+        self.assertEqual(refund_count, 1)

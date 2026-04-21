@@ -229,8 +229,8 @@ def diff_portal_state(
 
 def filter_fill_plan_result(
     fill_plan_result: dict[str, Any],
-    page_type: str | None = None,
-    field_id: str | None = None,
+    page_type: Optional[str] = None,
+    field_id: Optional[str] = None,
 ) -> dict[str, Any]:
     pages = []
     for page in fill_plan_result.get("pages", []):

@@ -29,6 +29,10 @@ class CounterConsentRequest(BaseModel):
     approved: bool = True
     note: Optional[str] = None
 
+
+class BulkExportRequest(BaseModel):
+    thread_ids: Optional[list[str]] = None
+
 router = APIRouter(prefix="/api/ca", tags=["ca-workspace"])
 
 
@@ -62,6 +66,7 @@ async def clients() -> dict:
         tax_facts = latest.tax_facts or {}
         submission = latest.submission_summary or {}
         support_assessment = assess_agent_state(latest, activity)
+        executions = activity.get("executions", [])
         items.append(
             {
                 "thread_id": latest.thread_id,
@@ -77,7 +82,7 @@ async def clients() -> dict:
                 "access_role": access_role,
                 "support_mode": support_assessment["mode"],
                 "can_autofill": support_assessment["can_autofill"],
-                "last_execution": activity.get("executions", [None])[0],
+                "last_execution": executions[0] if executions else None,
             }
         )
     return {"items": items}
@@ -111,6 +116,48 @@ async def client_support(thread_id: str) -> dict:
         return await review_workspace.support_assessment(thread_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="thread_not_found") from exc
+
+
+@router.get("/client/{thread_id}/export")
+async def download_client_export(thread_id: str) -> Response:
+    auth = get_request_auth(required=True)
+    try:
+        content, filename = await review_workspace.build_client_export_bundle(
+            thread_id=thread_id,
+            user_id=auth.user_id,
+            email=auth.email,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="thread_not_found") from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+    return Response(
+        content=content,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post("/exports/bulk")
+async def download_bulk_export(payload: BulkExportRequest) -> Response:
+    auth = get_request_auth(required=True)
+    try:
+        content, filename = await review_workspace.build_bulk_export_bundle(
+            user_id=auth.user_id,
+            email=auth.email,
+            thread_ids=payload.thread_ids,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    return Response(
+        content=content,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.post("/handoffs/prepare")

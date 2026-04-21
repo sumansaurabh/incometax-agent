@@ -12,6 +12,15 @@ from itx_backend.agent.state import AgentState
 from itx_backend.security.quarantine import ensure_thread_not_quarantined
 from itx_backend.security.request_auth import get_request_auth, require_thread_state
 from itx_backend.services.filing_runtime import filing_runtime
+from itx_backend.services.official_artifacts import prepare_official_artifact_attachment
+from itx_backend.services.post_filing import (
+    assessment_year_for_state,
+    build_next_ay_checklist,
+    build_refund_status_capture,
+    build_year_over_year_comparison,
+    prepare_notice_response,
+    select_prior_filed_state,
+)
 from itx_backend.services.regime_advisor import compare_regimes
 from itx_backend.services.retention import retention_service
 
@@ -34,6 +43,19 @@ class CompleteSubmissionRequest(BaseModel):
     portal_ref: Optional[str] = None
     filed_at: Optional[str] = None
     itr_v_text: Optional[str] = None
+
+
+class OfficialArtifactAttachmentRequest(BaseModel):
+    thread_id: str
+    artifact_kind: str = "itr_v"
+    page_type: Optional[str] = None
+    page_title: Optional[str] = None
+    page_url: Optional[str] = None
+    portal_state: Optional[dict[str, Any]] = None
+    manual_text: Optional[str] = None
+    ack_no: Optional[str] = None
+    portal_ref: Optional[str] = None
+    filed_at: Optional[str] = None
 
 
 class EVerifyPrepareRequest(BaseModel):
@@ -68,6 +90,35 @@ class ConsentRevokeRequest(BaseModel):
 
 class RegimePreviewRequest(BaseModel):
     thread_id: str
+
+
+class YearOverYearRequest(BaseModel):
+    thread_id: str
+
+
+class NextAyChecklistRequest(BaseModel):
+    thread_id: str
+
+
+class NoticePreparationRequest(BaseModel):
+    thread_id: str
+    notice_text: str
+    notice_type: str = "143(1)"
+
+
+class RefundStatusCaptureRequest(BaseModel):
+    thread_id: str
+    page_type: Optional[str] = None
+    page_title: Optional[str] = None
+    page_url: Optional[str] = None
+    portal_state: Optional[dict[str, Any]] = None
+    manual_status: Optional[str] = None
+    manual_portal_ref: Optional[str] = None
+    manual_refund_amount: Optional[Any] = None
+    manual_issued_at: Optional[str] = None
+    manual_processed_at: Optional[str] = None
+    manual_refund_mode: Optional[str] = None
+    manual_bank_masked: Optional[str] = None
 
 
 def _require_state(state: Optional[AgentState]) -> AgentState:
@@ -170,6 +221,55 @@ async def complete_submit(payload: CompleteSubmissionRequest) -> dict[str, Any]:
         "thread_id": payload.thread_id,
         "submission_status": state.submission_status,
         "artifacts": artifacts,
+    }
+
+
+@router.post("/artifacts/official")
+async def attach_official_artifact(payload: OfficialArtifactAttachmentRequest) -> dict[str, Any]:
+    state = await require_thread_state(payload.thread_id)
+    if state.submission_status not in {"submitted", "verified"} and not state.filing_artifacts:
+        raise HTTPException(status_code=409, detail="submission_artifacts_required")
+
+    try:
+        prepared = prepare_official_artifact_attachment(
+            artifact_kind=payload.artifact_kind,
+            page_type=payload.page_type,
+            page_title=payload.page_title,
+            page_url=payload.page_url,
+            portal_state=payload.portal_state,
+            manual_text=payload.manual_text,
+            ack_no=payload.ack_no,
+            portal_ref=payload.portal_ref,
+            filed_at=payload.filed_at,
+        )
+        prepared["metadata"]["assessment_year"] = state.submission_summary.get(
+            "assessment_year", state.tax_facts.get("assessment_year")
+        )
+        artifacts = await filing_runtime.attach_official_artifact(
+            thread_id=payload.thread_id,
+            artifact_kind=prepared["artifact_kind"],
+            content=prepared["content"],
+            ack_no=prepared.get("ack_no"),
+            portal_ref=prepared.get("portal_ref"),
+            filed_at=prepared.get("filed_at"),
+            metadata=prepared["metadata"],
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="filed_artifacts_not_found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    state.filing_artifacts = artifacts
+    await checkpointer.save(state)
+    return {
+        "thread_id": payload.thread_id,
+        "artifacts": artifacts,
+        "official_artifact": {
+            "artifact_kind": prepared["artifact_kind"],
+            "ack_no": prepared.get("ack_no"),
+            "portal_ref": prepared.get("portal_ref"),
+            "filed_at": prepared.get("filed_at"),
+        },
     }
 
 
@@ -347,6 +447,92 @@ async def regime_preview(payload: RegimePreviewRequest) -> dict[str, Any]:
     }
 
 
+@router.post("/year-over-year")
+async def year_over_year(payload: YearOverYearRequest) -> dict[str, Any]:
+    state = await require_thread_state(payload.thread_id)
+    if not state.submission_summary:
+        state, _ = await _refresh_submission_summary(state, is_final=True)
+    prior_state = select_prior_filed_state(state, await checkpointer.list_latest_states())
+    comparison = build_year_over_year_comparison(state, prior_state)
+    return await filing_runtime.record_year_over_year_comparison(
+        thread_id=payload.thread_id,
+        user_id=state.user_id,
+        current_assessment_year=assessment_year_for_state(state),
+        prior_thread_id=prior_state.thread_id if prior_state else None,
+        prior_assessment_year=assessment_year_for_state(prior_state) if prior_state else None,
+        comparison=comparison,
+    )
+
+
+@router.post("/next-ay-checklist")
+async def next_ay_checklist(payload: NextAyChecklistRequest) -> dict[str, Any]:
+    state = await require_thread_state(payload.thread_id)
+    if not state.submission_summary:
+        state, _ = await _refresh_submission_summary(state, is_final=True)
+    checklist = build_next_ay_checklist(state)
+    return await filing_runtime.upsert_next_ay_checklist(
+        thread_id=payload.thread_id,
+        user_id=state.user_id,
+        current_assessment_year=checklist.get("current_assessment_year"),
+        target_assessment_year=str(checklist.get("target_assessment_year")),
+        checklist=checklist.get("items", []),
+        summary=checklist.get("summary", {}),
+    )
+
+
+@router.post("/notices/prepare")
+async def prepare_notice(payload: NoticePreparationRequest) -> dict[str, Any]:
+    state = await require_thread_state(payload.thread_id)
+    prepared = prepare_notice_response(state, payload.notice_text, payload.notice_type)
+    extracted = {key: value for key, value in prepared.items() if key not in {"explanation_md", "suggested_response"}}
+    return await filing_runtime.record_notice_preparation(
+        thread_id=payload.thread_id,
+        user_id=state.user_id,
+        notice_type=payload.notice_type,
+        assessment_year=prepared.get("assessment_year"),
+        notice_text=payload.notice_text,
+        extracted=extracted,
+        explanation_md=prepared["explanation_md"],
+        suggested_response=prepared["suggested_response"],
+    )
+
+
+@router.post("/refund-status/capture")
+async def capture_refund_status(payload: RefundStatusCaptureRequest) -> dict[str, Any]:
+    state = await require_thread_state(payload.thread_id)
+    try:
+        snapshot = build_refund_status_capture(
+            state,
+            page_type=payload.page_type,
+            page_title=payload.page_title,
+            page_url=payload.page_url,
+            portal_state=payload.portal_state,
+            manual_status=payload.manual_status,
+            manual_portal_ref=payload.manual_portal_ref,
+            manual_refund_amount=payload.manual_refund_amount,
+            manual_issued_at=payload.manual_issued_at,
+            manual_processed_at=payload.manual_processed_at,
+            manual_refund_mode=payload.manual_refund_mode,
+            manual_bank_masked=payload.manual_bank_masked,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return await filing_runtime.record_refund_status(
+        thread_id=payload.thread_id,
+        user_id=state.user_id,
+        assessment_year=snapshot.get("assessment_year"),
+        status=str(snapshot["status"]),
+        refund_amount=snapshot.get("refund_amount"),
+        portal_ref=snapshot.get("portal_ref"),
+        issued_at=snapshot.get("issued_at"),
+        processed_at=snapshot.get("processed_at"),
+        refund_mode=snapshot.get("refund_mode"),
+        bank_masked=snapshot.get("bank_masked"),
+        source=str(snapshot["source"]),
+        observation=snapshot.get("observation", {}),
+    )
+
+
 @router.get("/{thread_id}")
 async def filing_state(thread_id: str) -> dict[str, Any]:
     state = await require_thread_state(thread_id)
@@ -363,6 +549,10 @@ async def filing_state(thread_id: str) -> dict[str, Any]:
         "consents": await filing_runtime.list_consents(thread_id),
         "purge_jobs": await retention_service.list_purge_jobs(thread_id),
         "revision": await filing_runtime.latest_revision(thread_id),
+        "year_over_year": await filing_runtime.latest_year_over_year(thread_id),
+        "next_ay_checklist": await filing_runtime.latest_next_ay_checklist(thread_id),
+        "notices": await filing_runtime.list_notice_preparations(thread_id),
+        "refund_status": await filing_runtime.latest_refund_status(thread_id),
         "archived": state.archived,
     }
 

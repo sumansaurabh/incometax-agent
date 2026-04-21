@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 
 import {
   ApprovalItem,
+  attachOfficialArtifact,
   AuthIdentity,
   DetectedField,
   EverificationRecord,
@@ -9,13 +10,18 @@ import {
   FilingArtifacts,
   FillAction,
   FillPlan,
+  NextAyChecklistRecord,
+  NoticePreparationRecord,
   PageContextPayload,
   PurgeJob,
   RegimePreview,
+  RefundStatusRecord,
   SupportAssessment,
   SubmissionSummaryData,
   ValidationError,
   ValidationHelpItem,
+  YearOverYearRecord,
+  captureRefundStatus,
   completeEVerify,
   completeSubmission,
   counterConsentReviewerSignoff,
@@ -25,6 +31,7 @@ import {
   ensureThread,
   fetchCurrentIdentity,
   fetchFilingState,
+  generateNextAyChecklist,
   fetchRegimePreview,
   fetchSupportAssessment,
   fetchTaxFacts,
@@ -32,9 +39,11 @@ import {
   fetchValidationHelp,
   filingArtifactUrl,
   generateSubmissionSummary,
+  generateYearOverYearComparison,
   loginToBackend,
   normalizeApprovalItems,
   prepareEVerifyApproval,
+  prepareNoticeResponse,
   prepareReviewHandoff,
   prepareSubmissionApproval,
   recordExecution,
@@ -50,6 +59,7 @@ import { ChatPane } from "./panes/ChatPane";
 import { DetectedDetailsPane } from "./panes/DetectedDetailsPane";
 import { PendingActionsPane } from "./panes/PendingActionsPane";
 import { EvidencePane } from "./panes/EvidencePane";
+import { PostFilingPane } from "./panes/PostFilingPane";
 import { SubmissionPane } from "./panes/SubmissionPane";
 import { SupportPane } from "./panes/SupportPane";
 import { clearSidepanelSession, SidepanelSession, loadSidepanelSession, saveSidepanelSession } from "./session";
@@ -212,6 +222,10 @@ export default function App(): JSX.Element {
   const [submissionStatus, setSubmissionStatus] = useState("draft");
   const [filingArtifacts, setFilingArtifacts] = useState<FilingArtifacts | null>(null);
   const [everification, setEverification] = useState<EverificationRecord | null>(null);
+  const [yearOverYear, setYearOverYear] = useState<YearOverYearRecord | null>(null);
+  const [nextAyChecklist, setNextAyChecklist] = useState<NextAyChecklistRecord | null>(null);
+  const [noticePreparations, setNoticePreparations] = useState<NoticePreparationRecord[]>([]);
+  const [refundStatus, setRefundStatus] = useState<RefundStatusRecord | null>(null);
   const [reviewerEmail, setReviewerEmail] = useState("");
   const [isArchived, setIsArchived] = useState(false);
   const [nextRevisionNumber, setNextRevisionNumber] = useState(1);
@@ -230,6 +244,10 @@ export default function App(): JSX.Element {
     setSubmissionStatus("draft");
     setFilingArtifacts(null);
     setEverification(null);
+    setYearOverYear(null);
+    setNextAyChecklist(null);
+    setNoticePreparations([]);
+    setRefundStatus(null);
     setIsArchived(false);
     setNextRevisionNumber(1);
     setFacts([]);
@@ -321,6 +339,10 @@ export default function App(): JSX.Element {
     setNextRevisionNumber(Number((filingPayload.revision?.revision_number as number | undefined) ?? 0) + 1);
     setConsents(filingPayload.consents ?? []);
     setPurgeJobs((filingPayload.purge_jobs ?? []) as PurgeJob[]);
+    setYearOverYear(filingPayload.year_over_year ?? null);
+    setNextAyChecklist(filingPayload.next_ay_checklist ?? null);
+    setNoticePreparations(filingPayload.notices ?? []);
+    setRefundStatus(filingPayload.refund_status ?? null);
     setSupportAssessment(supportPayload);
   };
 
@@ -664,6 +686,60 @@ export default function App(): JSX.Element {
     }
   };
 
+  const handleAttachOfficialArtifact = async (manualText: string, ackNo: string, portalRef: string, filedAt: string) => {
+    if (!session) {
+      return;
+    }
+    setIsBusy(true);
+    try {
+      const result = await attachOfficialArtifact({
+        threadId: session.threadId,
+        manualText,
+        ackNo,
+        portalRef,
+        filedAt,
+      });
+      setFilingArtifacts(result.artifacts);
+      appendMessage("Attached official filing artifact from pasted portal content.");
+      await refreshBackendState(session.threadId);
+    } catch (error: unknown) {
+      appendMessage(`Official artifact attachment failed: ${error instanceof Error ? error.message : "unknown error"}`);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const handleCaptureOfficialArtifactPage = async (ackNo: string, portalRef: string, filedAt: string) => {
+    if (!session) {
+      return;
+    }
+    const snapshot = await refreshSnapshot();
+    if (!snapshot) {
+      appendMessage("Official artifact capture requires an active portal page.");
+      return;
+    }
+    setIsBusy(true);
+    try {
+      const result = await attachOfficialArtifact({
+        threadId: session.threadId,
+        pageType: snapshot.page,
+        pageTitle: snapshot.title,
+        pageUrl: snapshot.url,
+        portalState: snapshot.portalState,
+        ackNo,
+        portalRef,
+        filedAt,
+      });
+      setFilingArtifacts(result.artifacts);
+      appendMessage("Captured the current portal page as the official filing artifact.");
+      await refreshBackendState(session.threadId);
+    } catch (error: unknown) {
+      appendMessage(`Official artifact capture failed: ${error instanceof Error ? error.message : "unknown error"}`);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
   const handlePrepareEVerify = async (method: string) => {
     if (!session) {
       return;
@@ -762,6 +838,131 @@ export default function App(): JSX.Element {
       await refreshBackendState(nextSession.threadId);
     } catch (error: unknown) {
       appendMessage(`Revision creation failed: ${error instanceof Error ? error.message : "unknown error"}`);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const handleGenerateYearOverYear = async () => {
+    if (!session) {
+      return;
+    }
+    setIsBusy(true);
+    try {
+      const result = await generateYearOverYearComparison(session.threadId);
+      setYearOverYear(result);
+      appendMessage("Year-over-year comparison refreshed.");
+      await refreshBackendState(session.threadId);
+    } catch (error: unknown) {
+      appendMessage(`Year-over-year comparison failed: ${error instanceof Error ? error.message : "unknown error"}`);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const handleGenerateNextAyChecklist = async () => {
+    if (!session) {
+      return;
+    }
+    setIsBusy(true);
+    try {
+      const result = await generateNextAyChecklist(session.threadId);
+      setNextAyChecklist(result);
+      appendMessage(`Next-AY readiness checklist prepared for ${result.target_assessment_year}.`);
+      await refreshBackendState(session.threadId);
+    } catch (error: unknown) {
+      appendMessage(`Next-AY checklist failed: ${error instanceof Error ? error.message : "unknown error"}`);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const handlePrepareNotice = async (noticeText: string) => {
+    if (!session) {
+      return;
+    }
+    setIsBusy(true);
+    try {
+      const result = await prepareNoticeResponse({
+        threadId: session.threadId,
+        noticeText,
+        noticeType: "143(1)",
+      });
+      setNoticePreparations((previous) => [result, ...previous.filter((item) => item.record_id !== result.record_id)]);
+      appendMessage("Prepared a read-only notice explanation and response checklist.");
+      await refreshBackendState(session.threadId);
+    } catch (error: unknown) {
+      appendMessage(`Notice preparation failed: ${error instanceof Error ? error.message : "unknown error"}`);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const handleCaptureRefundStatusPage = async () => {
+    if (!session) {
+      return;
+    }
+    const snapshot = await refreshSnapshot();
+    if (!snapshot) {
+      appendMessage("Refund status capture requires an active portal page.");
+      return;
+    }
+    if (snapshot.page !== "refund-status") {
+      appendMessage("Open the refund-status page on the official portal or use the manual refund-status form.");
+      return;
+    }
+    setIsBusy(true);
+    try {
+      const result = await captureRefundStatus({
+        threadId: session.threadId,
+        pageType: snapshot.page,
+        pageTitle: snapshot.title,
+        pageUrl: snapshot.url,
+        portalState: snapshot.portalState,
+      });
+      setRefundStatus(result);
+      appendMessage(`Captured refund status: ${result.status}.`);
+      await refreshBackendState(session.threadId);
+    } catch (error: unknown) {
+      appendMessage(`Refund status capture failed: ${error instanceof Error ? error.message : "unknown error"}`);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const handleSaveManualRefundStatus = async (input: {
+    status: string;
+    portalRef?: string;
+    refundAmount?: string;
+    issuedAt?: string;
+    processedAt?: string;
+    refundMode?: string;
+    bankMasked?: string;
+  }) => {
+    if (!session) {
+      return;
+    }
+    setIsBusy(true);
+    try {
+      const result = await captureRefundStatus({
+        threadId: session.threadId,
+        pageType: page,
+        pageTitle: pageContext?.title ?? null,
+        pageUrl: pageContext?.url ?? null,
+        portalState: pageContext?.portalState ?? null,
+        manualStatus: input.status,
+        manualPortalRef: input.portalRef,
+        manualRefundAmount: input.refundAmount,
+        manualIssuedAt: input.issuedAt,
+        manualProcessedAt: input.processedAt,
+        manualRefundMode: input.refundMode,
+        manualBankMasked: input.bankMasked,
+      });
+      setRefundStatus(result);
+      appendMessage(`Saved refund status: ${result.status}.`);
+      await refreshBackendState(session.threadId);
+    } catch (error: unknown) {
+      appendMessage(`Saving refund status failed: ${error instanceof Error ? error.message : "unknown error"}`);
     } finally {
       setIsBusy(false);
     }
@@ -1074,9 +1275,26 @@ export default function App(): JSX.Element {
         onPrepareEVerify={(method) => void handlePrepareEVerify(method)}
         onStartEVerify={(method) => void handleStartEVerify(method)}
         onCompleteEVerify={(portalRef) => void handleCompleteEVerify(portalRef)}
+        onAttachOfficialArtifact={(manualText, ackNo, portalRef, filedAt) =>
+          void handleAttachOfficialArtifact(manualText, ackNo, portalRef, filedAt)}
+        onCaptureOfficialArtifactPage={(ackNo, portalRef, filedAt) =>
+          void handleCaptureOfficialArtifactPage(ackNo, portalRef, filedAt)}
         onCreateRevision={(reason) => void handleCreateRevision(reason)}
         onRevokeConsent={(consentId) => void handleRevokeConsent(consentId)}
         onOpenArtifact={(artifactName) => void handleOpenArtifact(artifactName)}
+      />
+      <PostFilingPane
+        currentPage={page}
+        yearOverYear={yearOverYear}
+        nextAyChecklist={nextAyChecklist}
+        notices={noticePreparations}
+        refundStatus={refundStatus}
+        isBusy={isBusy}
+        onGenerateYearOverYear={() => void handleGenerateYearOverYear()}
+        onGenerateNextAyChecklist={() => void handleGenerateNextAyChecklist()}
+        onPrepareNotice={(noticeText) => void handlePrepareNotice(noticeText)}
+        onCaptureRefundStatusPage={() => void handleCaptureRefundStatusPage()}
+        onSaveManualRefundStatus={(input) => void handleSaveManualRefundStatus(input)}
       />
       <EvidencePane facts={facts} />
     </main>

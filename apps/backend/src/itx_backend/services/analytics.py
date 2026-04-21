@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Optional
 
 from itx_backend.telemetry.metrics import metrics
 
@@ -21,7 +21,7 @@ class AnalyticsService:
     def __init__(self) -> None:
         self._events: list[FilingEvent] = []
 
-    def track(self, event_type: str, stage: str, thread_id: str, payload: dict[str, Any] | None = None) -> None:
+    def track(self, event_type: str, stage: str, thread_id: str, payload: Optional[dict[str, Any]] = None) -> None:
         self._events.append(
             FilingEvent(
                 event_type=event_type,

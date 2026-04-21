@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import datetime, timezone
+from typing import Optional
 
 from itx_backend.agent.state import AgentState
 from itx_backend.services.action_runtime import action_runtime
@@ -16,7 +17,7 @@ def _collect_required_action_ids(fill_plan: dict) -> list[str]:
     ]
 
 
-def _find_selector_failure(executed: list[dict], blocked: list[dict]) -> dict | None:
+def _find_selector_failure(executed: list[dict], blocked: list[dict]) -> Optional[dict]:
     for item in blocked + executed:
         if item.get("result") in {"selector_miss", "readback_mismatch", "validation_error"}:
             return {

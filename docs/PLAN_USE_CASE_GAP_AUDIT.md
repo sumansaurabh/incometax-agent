@@ -1,6 +1,6 @@
 # Plan And Use-Case Coverage Audit
 
-Date: 2026-04-21
+Date: 2026-04-22
 
 ## Status Legend
 
@@ -22,6 +22,9 @@ Implemented after the original audit:
 - Device-bound auth/session lifecycle, authenticated API + WebSocket access, consent revocation, retention-driven purge jobs, and verified-host / lookalike-domain protection in the extension.
 - Validation-error translation, regime comparison with targeted regime-switch proposals, unsupported-flow assessment with guided-checklist downgrade, durable CA handoff packages, and thread quarantine on anomaly detection.
 - Prompt-injection-aware document screening that flags risky uploads and blocks high-risk text documents before fact extraction.
+- Post-filing runtime for year-over-year comparison, next-AY readiness checklists, read-only notice-response preparation, and refund-status capture with persisted filing-state records and sidepanel UI.
+- CA workspace export bundles for single-client and multi-client archives, including stored filing artifacts and prepared handoff packages.
+- Official filing-artifact attachment that replaces the placeholder ITR-V archive with captured portal acknowledgement content when the user provides or captures it.
 
 Validation performed after these implementations:
 
@@ -31,8 +34,11 @@ Validation performed after these implementations:
 - `PYTHONPATH=apps/backend/src:apps/workers/src:packages/rules-core/src PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 pytest apps/backend/tests/api/test_review_workspace.py` passed.
 - `python -m compileall apps/backend/src apps/workers/src` passed after the new support-assessment, quarantine, and document-security changes.
 - `pnpm --filter @itx/extension build` passed after wiring validation help, regime preview, support-status, handoff, and quarantine UI.
+- `ITX_DATABASE_URL=postgresql://itx:itx@localhost:5432/itx PYTHONPATH=apps/backend/src:apps/workers/src:packages/rules-core/src python -m pytest apps/backend/tests/api/test_filing.py -q` passed after the post-filing implementation.
+- `PYTHONPATH=apps/backend/src:apps/workers/src:packages/rules-core/src python -m compileall apps/backend/src apps/workers/src packages/rules-core/src` passed after the post-filing implementation and Python 3.9 annotation cleanup.
+- `ITX_DATABASE_URL=postgresql://itx:itx@localhost:5432/itx PYTHONPATH=apps/backend/src:apps/workers/src:packages/rules-core/src python -m pytest apps/backend/tests/api/test_filing.py apps/backend/tests/api/test_reviewer_workflow.py -q` passed after adding CA export bundles.
 
-What is still materially pending now is concentrated in Phase 5 from `docs/PLAN.md`: broader taxpayer coverage, CA workspace depth, analytics, retention/revocation, notice/refund flows, and production hardening.
+What is still materially pending now is concentrated in the remaining Phase 0 and Phase 1 hardening gaps, the Phase 4 updated-return and dashboard-depth gaps, and the Phase 5 breadth and operability backlog. `docs/IMPLEMENTATION_30_POINT_PLAN.md` now holds the canonical 30-point finish plan for that remaining work.
 
 ## What Was Reviewed
 
@@ -65,40 +71,40 @@ Validation performed:
 
 Representative evidence paths:
 
-- Backend graph and nodes: `apps/backend/src/itx_backend/agent/graph.py`
-- In-memory checkpointing: `apps/backend/src/itx_backend/agent/checkpointer.py`
-- Minimal auth/doc/action APIs: `apps/backend/src/itx_backend/api/*.py`
-- Extension shell and sample state: `apps/extension/src/sidepanel/App.tsx`
-- Extension browser actions: `apps/extension/src/content/actions/*.ts`
-- Parser stubs: `apps/workers/src/itx_workers/parsers/*.py`
-- Empty adapter form schemas: `packages/portal-adapters/src/pages/*.ts`
+- Backend graph and checkpoint runtime: `apps/backend/src/itx_backend/agent/graph.py`, `apps/backend/src/itx_backend/agent/checkpointer.py`
+- Durable action and filing runtime: `apps/backend/src/itx_backend/services/action_runtime.py`, `apps/backend/src/itx_backend/services/filing_runtime.py`
+- Auth, security, and CA workspace APIs: `apps/backend/src/itx_backend/api/auth.py`, `apps/backend/src/itx_backend/api/security.py`, `apps/backend/src/itx_backend/api/ca_workspace.py`
+- Extension sidepanel and authenticated session bridge: `apps/extension/src/sidepanel/App.tsx`, `apps/extension/src/shared/auth-session.ts`, `apps/extension/src/background/connector.ts`
+- Document pipeline, sanitizer, and support workflow runtime: `apps/backend/src/itx_backend/api/documents.py`, `apps/workers/src/itx_workers/security/sanitize.py`, `apps/backend/src/itx_backend/services/review_workspace.py`
+- Adapter coverage gaps: `packages/portal-adapters/src/pages/*.ts`
 - CI masking failures: `.github/workflows/ci.yml`
-- Missing backend tests: `apps/backend/tests/`
+- Remaining automated test and persona coverage: `apps/backend/tests/`, `tests/fixtures/`, `tests/personas/`
 
 ## Executive Summary
 
-The repository is a broad implementation scaffold, not a completed realization of the documented plan.
+The repository is no longer just a scaffold, but it is still short of phase-exit completeness.
 
 The strongest areas are:
 
-- backend node coverage for explanation, missing-input generation, fill-plan generation, approval gating, submission summary, and e-verify guidance;
-- extension shell structure and a substantial evidence-viewer component;
-- selector-drift telemetry, replay-harness scaffolding, and lightweight analytics;
-- a narrow deterministic rules-core and shared schema/DSL packages.
+- async Postgres-backed backend runtime for documents, proposals, approvals, executions, submissions, consents, purge jobs, and revisions;
+- authenticated extension flows for validation help, regime preview, support assessment, CA handoffs, quarantine resume, and reviewer sign-off;
+- reviewer-facing export bundles that package client state, filing artifacts, and handoff packages for downstream operations;
+- document intake, normalization, evidence persistence, and reconciliation baseline;
+- trust and safety controls including verified-host states, prompt-injection screening, anomaly quarantine, and durable audit records.
 
 The weakest areas are now:
 
-- real document upload, parsing, normalization, and evidence persistence;
-- page adapters and DOM schemas for the portal;
-- broader parser coverage and post-filing features;
-- deeper CA workspace tooling, bulk export, richer analytics, and inline field evidence;
+- page adapters and DOM-derived schemas across more portal branches;
+- broader parser coverage, OCR quality, and extraction accuracy validation;
+- broader rules coverage for complex taxpayers and updated-return coverage;
+- deeper CA dashboard tooling, richer analytics, replay depth, and inline field evidence;
 - automated tests and CI enforcement.
 
 Bottom line:
 
 - Phase 2-4 core assisted filing is implemented in code with durable persistence.
 - Several Phase 5 trust/safety items are now also implemented in code.
-- The repository still falls short of full roadmap completion because broader taxpayer coverage, post-filing features, reviewer workspace depth, and CI depth remain open.
+- The repository still falls short of full roadmap completion because broader taxpayer coverage, updated-return coverage, CA dashboard depth, and CI depth remain open.
 
 ## Phase-Level Verdict
 
@@ -123,50 +129,25 @@ Key reasons:
 - Parser accuracy, replay coverage, persona flows, and live demo validations are not present.
 - Submission artifacts, approvals, consents, and filing-runtime records are now durably written for the implemented path, but broader audit export, retention, and operational controls remain incomplete.
 
-## 30-Point Plan Audit
+## 30-Point Finish Plan
 
-This section re-audits `docs/IMPLEMENTATION_30_POINT_PLAN.md`.
+`docs/IMPLEMENTATION_30_POINT_PLAN.md` is now the canonical remaining-work plan. The earlier scaffold-executed checklist has been retired because it no longer matches the current repo state.
 
-| # | Claimed Item | Actual Status | Notes |
-|---|---|---|---|
-| 1 | Initialize pnpm + uv + Turbo monorepo | Partial | pnpm, Turbo, and CI exist; `uv` is not configured and Python tooling is Poetry-based. |
-| 2 | Create top-level folder structure | Scaffold-complete | The repo shape broadly matches the documented structure. |
-| 3 | Configure root CI pipeline for build/lint/test | Partial | CI exists, but `lint` and `test` are allowed to fail and typecheck/schema checks are missing. |
-| 4 | Create extension MV3 manifest with host restriction | Scaffold-complete | MV3 manifest exists with host restriction to `https://www.incometax.gov.in/*`. |
-| 5 | Build extension side panel shell UI | Scaffold-complete | Side panel app and panes exist, but state is still sample-driven. |
-| 6 | Add extension background service worker and router | Scaffold-complete | Service worker, router, auth, connector, and action-runner modules exist. |
-| 7 | Add extension backend connector over WebSocket | Partial | Connector hardcodes localhost WS and lacks auth, reconnect, and session binding. |
-| 8 | Add extension secure storage helpers | Partial | Storage helpers exist, but "encryption" is only base64 encoding. |
-| 9 | Add extension content script bootstrapping | Scaffold-complete | Content script entry exists and sends a page-detected event. |
-| 10 | Add extension page detector | Partial | Detection is simple title/URL matching and supports only a subset of planned behavior. |
-| 11 | Add extension field-map and action executors | Partial | Minimal DOM helpers exist, but no robust field schema extraction or tab-scoped execution layer. |
-| 12 | Create backend FastAPI app and health endpoint | Scaffold-complete | App factory and `/health` endpoint exist. |
-| 13 | Implement backend auth API stub | Scaffold-complete | Auth endpoint exists, but only returns a dev token. |
-| 14 | Implement backend threads API stub | Scaffold-complete | Start/get endpoints exist, but pause/resume and true checkpoint lifecycle do not. |
-| 15 | Implement backend documents signed-upload stub | Scaffold-complete | Signed-upload stub exists, but no storage integration or document state machine. |
-| 16 | Implement backend actions decision API stub | Scaffold-complete | Approve/reject stub exists, but it is not persisted or wired end to end. |
-| 17 | Implement backend tax-facts read API stub | Scaffold-complete | Read stub exists, but it returns placeholder data. |
-| 18 | Implement backend websocket echo channel | Scaffold-complete | Websocket endpoint exists and echoes messages. |
-| 19 | Implement LangGraph-style graph flow | Partial | A sequential custom runner exists, but not a real LangGraph state graph with branching/checkpoint semantics. |
-| 20 | Implement checkpointer baseline | Partial | Checkpointer exists, but is in-memory only rather than Postgres-backed. |
-| 21 | Add telemetry baseline | Partial | Tracing, metrics, analytics, and drift telemetry exist, but coverage and integrations are limited. |
-| 22 | Add security baseline | Partial | Rate limiting, anomaly detection, and PII redaction exist, but consent, crypto, retention, and anti-phishing are incomplete. |
-| 23 | Add DB layer baseline | Partial | One minimal migration and dataclass-like models exist, far short of the documented data model. |
-| 24 | Implement workers queue and doc pipeline stages | Partial | Queue and pipeline stages exist, but most stages are pass-through stubs. |
-| 25 | Implement workers parser modules | Partial | Parser files exist for many formats, but sampled parsers are all stub implementations. |
-| 26 | Implement workers reconciliation and severity modules | Partial | Reconciliation helpers exist, but they are simplistic and not domain-complete. |
-| 27 | Implement canonical tax-schema package | Partial | Shared schema package exists, but covers only a narrow subset of planned entities. |
-| 28 | Implement action-dsl package | Partial | DSL spec/schema/dist exist, but bindings are narrow and only partly mirrored across TS/Py. |
-| 29 | Implement portal-adapters package | Partial | Adapter files exist, but registry coverage is incomplete and `getFormSchema` returns empty arrays. |
-| 30 | Implement deterministic rules-core and baseline tests | Partial | Rules-core exists, but rule coverage is narrow and automated tests are minimal. |
+| Workstream | Items | Primary phase gaps it closes |
+|---|---|---|
+| Foundation and trust | 1-5 | Remaining Phase 0 hardening, consent-first UX, CI gates, environment bootstrap, audit export |
+| Portal awareness and adapters | 6-10 | Remaining Phase 1 adapter depth, page detection, validation recovery, selector-drift recovery |
+| Document intelligence quality | 11-15 | Phase 2 parser breadth, OCR quality, fixture-bank accuracy, reconciliation depth |
+| Rules, reasoning, and autofill breadth | 16-20 | Phase 3 rule coverage, persona coverage, inline evidence, tested autofill reliability |
+| Filing, reviewer, and post-filing completion | 21-25 | Remaining Phase 4 artifact, reviewer workspace, and post-filing gaps |
+| Reliability, analytics, and operations | 26-30 | Phase 5 replay, drift automation, analytics, security operations, and exit validation |
 
-Summary for the 30-point plan:
+The plan is intentionally cross-phase rather than phase-siloed.
 
-- Scaffold-complete: 12
-- Partial: 18
-- Missing: 0
-
-Important caveat: even the scaffold-complete items do not imply phase-exit completeness.
+- Items 1-10 close the remaining Phase 0 and Phase 1 gaps.
+- Items 11-20 deepen the already-implemented Phase 2 and Phase 3 core into broader supported coverage.
+- Items 21-25 close the remaining Phase 4 and post-filing/operator workflow gaps.
+- Items 26-30 close the remaining Phase 5 operability gaps and produce the final exit evidence.
 
 ## Use-Case Coverage Matrix
 
@@ -178,13 +159,13 @@ Strict scoring rule used here:
 
 Summary:
 
-- Implemented-in-code: 18
-- Partial: 43
-- Missing: 9
+- Implemented-in-code: 25
+- Partial: 42
+- Missing: 3
 
 ### A. Onboarding And Session
 
-1. Partial - Install and activate: MV3 manifest, host restriction, and side panel are in place, but there is no verified-host badge.
+1. Partial - Install and activate: MV3 manifest, host restriction, side panel, and verified/lookalike host trust state are in place, but onboarding and trust-recovery UX are still incomplete.
 2. Implemented-in-code - Device + session binding: device-bound login, refresh, revocation, request auth context, and authenticated WebSocket binding are implemented.
 3. Partial - Consent-first onboarding: a `consents` ledger now exists for submit/e-verify approvals, but there is no explicit onboarding or purpose-by-purpose consent-first flow.
 4. Partial - Resume a paused filing: checkpoints are now stored in Postgres and thread IDs can be reloaded, but explicit pause/resume UX and full browser-session restoration are still incomplete.
@@ -251,22 +232,22 @@ Summary:
 47. Implemented-in-code - Pre-submission summary: summary generation, persistence, and sidepanel review flow are implemented.
 48. Implemented-in-code - Explicit submission consent: consent text is hashed and persisted in `consents` for submit/e-verify approvals.
 49. Implemented-in-code - E-verification handoff: method-specific handoff, manual completion tracking, and sidepanel flow are implemented.
-50. Partial - ITR-V + JSON archive: summary, offline JSON, and evidence bundle are archived, but the ITR-V artifact is still a placeholder bundle rather than the official portal-issued file.
+50. Implemented-in-code - ITR-V + JSON archive: summary, offline JSON, and evidence bundle are archived, and the placeholder ITR-V can now be replaced with an attached official portal acknowledgement artifact.
 51. Implemented-in-code - Revised return: thread branching, lineage persistence, and sidepanel-triggered revision flow are implemented.
 52. Missing - Updated return (ITR-U) support: not implemented.
 
 ### H. Post-Filing And Multi-Year
 
-53. Missing - Year-over-year comparison: not implemented.
-54. Missing - Next-AY readiness checklist: not implemented.
-55. Missing - Notice-response prep: not implemented.
-56. Missing - Refund status tracking: not implemented.
+53. Implemented-in-code - Year-over-year comparison: filing-state comparisons are generated from current and prior filed summaries, persisted, and surfaced in the sidepanel.
+54. Implemented-in-code - Next-AY readiness checklist: the backend generates a persisted next-assessment-year checklist from filing facts and surfaced filing outcomes.
+55. Implemented-in-code - Notice-response prep: the backend prepares a read-only notice summary from pasted notice text, extracts adjustments and timelines, and packages suggested supporting documents without submitting a response.
+56. Implemented-in-code - Refund status tracking: refund status can be captured from the portal page or manual entry, persisted, and surfaced as part of filing state.
 
 ### I. CA Or Reviewer Workspace
 
 57. Partial - Multi-client list: CA API can enumerate thread summaries, but there is no real dashboard workflow.
 58. Implemented-in-code - Reviewer sign-off: owners can request reviewer sign-off for an approval, reviewers gain scoped access to the shared thread, reviewer decisions are persisted, and execution stays blocked until client counter-consent is recorded.
-59. Missing - Bulk export: not implemented.
+59. Implemented-in-code - Bulk export: CA users can now download single-client or multi-client ZIP archives containing client summaries, stored filing artifacts, and prepared handoff packages.
 
 ### J. Compliance, Safety, Trust
 
@@ -323,14 +304,14 @@ This section consolidates what is still genuinely pending after the recent Phase
 
 ### 6. Filing And Post-Filing Completion
 
-- Replace the placeholder ITR-V archive with the official portal-issued artifact when available.
+- Broaden the new official-artifact attachment path with stronger page-specific capture and portal-download automation when available.
 - Add ITR-U support.
-- Add year-over-year comparison, next-AY readiness, notice-response prep, and refund-status tracking.
+- Broaden the new post-filing baseline with uploaded-notice parsing, refund-status history, and response-packet export.
 
 ### 7. CA / Reviewer Workspace
 
 - Build an actual reviewer dashboard UI on top of the current list/detail APIs.
-- Add bulk export for clients.
+- Broaden the new export baseline with queue filters, saved export presets, and dashboard-integrated packaging flows.
 
 ### 8. Compliance, Retention, And Security Response
 
@@ -347,28 +328,16 @@ This section consolidates what is still genuinely pending after the recent Phase
 
 ## Recommended Remaining Implementation Plan
 
-This plan focuses only on the work that remains after the current Phase 2-4 implementation.
+Use `docs/IMPLEMENTATION_30_POINT_PLAN.md` as the canonical remaining-work plan.
 
-1. Strengthen extension-side cryptography around stored auth and session material.
-2. Add a consent-first onboarding flow for upload, fill, regime-compare, and reviewer-share purposes.
-3. Expand verified-host, lookalike, and unsupported-host recovery UX in the extension.
-4. Complete adapter schemas for all supported pages and remove remaining empty schemas.
-5. Make page detection and required-input discovery more DOM-driven and less title/URL-dependent.
-6. Extend translated portal validation recovery guidance across more pages and error shapes.
-7. Broaden parser coverage and accuracy for TIS, salary slips, rent receipts, home-loan certificates, ELSS/PPF proofs, and broker statements.
-8. Improve OCR quality and validation coverage in the document pipeline.
-9. Expand rules-core for residential status, richer deduction caps, fuller ITR eligibility, and presumptive-taxation reasoning.
-10. Expand unsupported-flow downgrade and CA handoff coverage across more portal branches.
-11. Harden selector-drift recovery and persist learned mappings in an operationally useful way.
-12. Add inline evidence traceability on filled portal fields.
-13. Replace the placeholder ITR-V archive with the official filed artifact where available.
-14. Implement ITR-U support with explicit escalation gates.
-15. Add year-over-year comparison, next-AY readiness, notice-response prep, and refund-status tracking.
-16. Build a real CA/reviewer dashboard UI.
-17. Add bulk export for CA/reviewer workflows.
-18. Expand backend, worker, extension, and replay-based automated tests.
-19. Add extraction-accuracy dashboards by parser version and document type.
-20. Remove remaining CI masking so lint, test, and replay regressions fail fast.
+If this needs to be broken into delivery tracks, use these six workstreams rather than maintaining a second checklist here:
+
+1. Foundation and trust hardening.
+2. Portal awareness and adapter depth.
+3. Document intelligence quality.
+4. Rules, reasoning, and autofill breadth.
+5. Filing, reviewer, and post-filing completion.
+6. Reliability, analytics, and operations.
 
 ## Practical Conclusion
 

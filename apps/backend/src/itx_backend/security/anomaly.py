@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Optional
 
 
 @dataclass
@@ -26,7 +26,7 @@ class ToolCallAnomalyDetector:
         self._events: dict[str, deque[float]] = defaultdict(deque)
         self._anomalies: list[Anomaly] = []
 
-    def observe(self, key: str, action: str, ts: float | None = None) -> list[Anomaly]:
+    def observe(self, key: str, action: str, ts: Optional[float] = None) -> list[Anomaly]:
         import time
 
         now = ts if ts is not None else time.time()

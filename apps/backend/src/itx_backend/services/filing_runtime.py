@@ -258,6 +258,94 @@ class FilingRuntimeService:
             **manifest,
         }
 
+    async def attach_official_artifact(
+        self,
+        *,
+        thread_id: str,
+        artifact_kind: str,
+        content: str,
+        ack_no: Optional[str],
+        portal_ref: Optional[str],
+        filed_at: Optional[Any],
+        metadata: dict[str, Any],
+    ) -> dict[str, Any]:
+        normalized_kind = artifact_kind.strip().lower()
+        if normalized_kind != "itr_v":
+            raise ValueError("unsupported_artifact_kind")
+
+        latest = await self.latest_artifacts(thread_id)
+        if not latest:
+            raise KeyError(thread_id)
+
+        storage_uri = _artifact_storage_uri(thread_id, f"official-{normalized_kind.replace('_', '-')}.md")
+        document_storage.write(storage_uri, _markdown_bytes(content))
+
+        filed_at_value = _normalize_timestamp(filed_at)
+        manifest = dict(latest.get("artifact_manifest") or {})
+        previous_itrv_uri = latest.get("itr_v_storage_uri")
+        if previous_itrv_uri and previous_itrv_uri != storage_uri:
+            manifest.setdefault("archived_itr_v_storage_uri", previous_itrv_uri)
+        manifest.update(
+            {
+                "ack_no": ack_no or latest.get("ack_no"),
+                "portal_ref": portal_ref or manifest.get("portal_ref"),
+                "official_itr_v_storage_uri": storage_uri,
+                "official_artifacts": {
+                    **dict(manifest.get("official_artifacts") or {}),
+                    normalized_kind: {
+                        "storage_uri": storage_uri,
+                        "attached_at": datetime.utcnow().isoformat(),
+                        "metadata": metadata,
+                    },
+                },
+            }
+        )
+
+        pool = await get_pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                await connection.execute(
+                    """
+                    update filed_return_artifacts
+                    set ack_no = $2,
+                        itr_v_storage_uri = $3,
+                        filed_at = coalesce($4, filed_at),
+                        artifact_manifest = $5::jsonb
+                    where id = $1::uuid
+                    """,
+                    latest["artifact_id"],
+                    ack_no or latest.get("ack_no"),
+                    storage_uri,
+                    filed_at_value,
+                    json.dumps(manifest, sort_keys=True),
+                )
+                await connection.execute(
+                    """
+                    insert into filing_audit_trail (id, ay_id, event, payload, rule_version, adapter_version)
+                    values ($1, $2, 'official_artifact_attached', $3::jsonb, $4, $5)
+                    """,
+                    uuid.uuid4(),
+                    str(metadata.get("assessment_year") or "unknown"),
+                    json.dumps(
+                        {
+                            "thread_id": thread_id,
+                            "artifact_kind": normalized_kind,
+                            "ack_no": ack_no or latest.get("ack_no"),
+                            "portal_ref": portal_ref,
+                            "storage_uri": storage_uri,
+                            "metadata": metadata,
+                        },
+                        sort_keys=True,
+                    ),
+                    "phase4-official-artifact-1",
+                    normalized_kind,
+                )
+
+        refreshed = await self.latest_artifacts(thread_id)
+        if not refreshed:
+            raise KeyError(thread_id)
+        return refreshed
+
     async def start_everification(
         self,
         *,
@@ -446,6 +534,253 @@ class FilingRuntimeService:
             )
         return self._serialize_revision(row) if row else None
 
+    async def record_year_over_year_comparison(
+        self,
+        *,
+        thread_id: str,
+        user_id: str,
+        current_assessment_year: Optional[str],
+        prior_thread_id: Optional[str],
+        prior_assessment_year: Optional[str],
+        comparison: dict[str, Any],
+    ) -> dict[str, Any]:
+        record_id = uuid.uuid4()
+        pool = await get_pool()
+        async with pool.acquire() as connection:
+            await connection.execute(
+                """
+                insert into year_over_year_comparisons (
+                    id, thread_id, user_id, current_assessment_year,
+                    prior_thread_id, prior_assessment_year, comparison_json
+                )
+                values ($1, $2, $3, $4, $5, $6, $7::jsonb)
+                """,
+                record_id,
+                thread_id,
+                user_id,
+                current_assessment_year,
+                prior_thread_id,
+                prior_assessment_year,
+                json.dumps(comparison, sort_keys=True),
+            )
+        latest = await self.latest_year_over_year(thread_id)
+        if not latest:
+            raise KeyError(thread_id)
+        return latest
+
+    async def latest_year_over_year(self, thread_id: str) -> Optional[dict[str, Any]]:
+        pool = await get_pool()
+        async with pool.acquire() as connection:
+            row = await connection.fetchrow(
+                """
+                select id, thread_id, user_id, current_assessment_year,
+                       prior_thread_id, prior_assessment_year,
+                       comparison_json::text as comparison_json, created_at
+                from year_over_year_comparisons
+                where thread_id = $1
+                order by created_at desc
+                limit 1
+                """,
+                thread_id,
+            )
+        return self._serialize_year_over_year(row) if row else None
+
+    async def upsert_next_ay_checklist(
+        self,
+        *,
+        thread_id: str,
+        user_id: str,
+        current_assessment_year: Optional[str],
+        target_assessment_year: str,
+        checklist: list[dict[str, Any]],
+        summary: dict[str, Any],
+    ) -> dict[str, Any]:
+        record_id = uuid.uuid4()
+        pool = await get_pool()
+        async with pool.acquire() as connection:
+            await connection.execute(
+                """
+                insert into next_ay_checklists (
+                    id, thread_id, user_id, current_assessment_year, target_assessment_year,
+                    checklist_json, summary_json
+                )
+                values ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb)
+                on conflict (thread_id) do update
+                set user_id = excluded.user_id,
+                    current_assessment_year = excluded.current_assessment_year,
+                    target_assessment_year = excluded.target_assessment_year,
+                    checklist_json = excluded.checklist_json,
+                    summary_json = excluded.summary_json,
+                    updated_at = now()
+                """,
+                record_id,
+                thread_id,
+                user_id,
+                current_assessment_year,
+                target_assessment_year,
+                json.dumps(checklist, sort_keys=True),
+                json.dumps(summary, sort_keys=True),
+            )
+        latest = await self.latest_next_ay_checklist(thread_id)
+        if not latest:
+            raise KeyError(thread_id)
+        return latest
+
+    async def latest_next_ay_checklist(self, thread_id: str) -> Optional[dict[str, Any]]:
+        pool = await get_pool()
+        async with pool.acquire() as connection:
+            row = await connection.fetchrow(
+                """
+                select id, thread_id, user_id, current_assessment_year, target_assessment_year,
+                       checklist_json::text as checklist_json, summary_json::text as summary_json,
+                       created_at, updated_at
+                from next_ay_checklists
+                where thread_id = $1
+                limit 1
+                """,
+                thread_id,
+            )
+        return self._serialize_next_ay_checklist(row) if row else None
+
+    async def record_notice_preparation(
+        self,
+        *,
+        thread_id: str,
+        user_id: str,
+        notice_type: str,
+        assessment_year: Optional[str],
+        notice_text: str,
+        extracted: dict[str, Any],
+        explanation_md: str,
+        suggested_response: dict[str, Any],
+    ) -> dict[str, Any]:
+        record_id = uuid.uuid4()
+        storage_uri = f"notices/{thread_id}/{record_id}.txt"
+        document_storage.write(storage_uri, notice_text.encode("utf-8"))
+        pool = await get_pool()
+        async with pool.acquire() as connection:
+            await connection.execute(
+                """
+                insert into notice_response_preparations (
+                    id, thread_id, user_id, notice_type, assessment_year,
+                    source_storage_uri, extracted_json, explanation_md, suggested_response_json
+                )
+                values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9::jsonb)
+                """,
+                record_id,
+                thread_id,
+                user_id,
+                notice_type,
+                assessment_year,
+                storage_uri,
+                json.dumps(extracted, sort_keys=True),
+                explanation_md,
+                json.dumps(suggested_response, sort_keys=True),
+            )
+        latest = await self.latest_notice_preparation(thread_id)
+        if not latest:
+            raise KeyError(thread_id)
+        return latest
+
+    async def latest_notice_preparation(self, thread_id: str) -> Optional[dict[str, Any]]:
+        pool = await get_pool()
+        async with pool.acquire() as connection:
+            row = await connection.fetchrow(
+                """
+                select id, thread_id, user_id, notice_type, assessment_year,
+                       source_storage_uri, extracted_json::text as extracted_json,
+                       explanation_md, suggested_response_json::text as suggested_response_json,
+                       created_at, updated_at
+                from notice_response_preparations
+                where thread_id = $1
+                order by created_at desc
+                limit 1
+                """,
+                thread_id,
+            )
+        return self._serialize_notice_preparation(row) if row else None
+
+    async def list_notice_preparations(self, thread_id: str) -> list[dict[str, Any]]:
+        pool = await get_pool()
+        async with pool.acquire() as connection:
+            rows = await connection.fetch(
+                """
+                select id, thread_id, user_id, notice_type, assessment_year,
+                       source_storage_uri, extracted_json::text as extracted_json,
+                       explanation_md, suggested_response_json::text as suggested_response_json,
+                       created_at, updated_at
+                from notice_response_preparations
+                where thread_id = $1
+                order by created_at desc
+                """,
+                thread_id,
+            )
+        return [self._serialize_notice_preparation(row) for row in rows]
+
+    async def record_refund_status(
+        self,
+        *,
+        thread_id: str,
+        user_id: str,
+        assessment_year: Optional[str],
+        status: str,
+        refund_amount: Optional[float],
+        portal_ref: Optional[str],
+        issued_at: Optional[Any],
+        processed_at: Optional[Any],
+        refund_mode: Optional[str],
+        bank_masked: Optional[str],
+        source: str,
+        observation: dict[str, Any],
+    ) -> dict[str, Any]:
+        record_id = uuid.uuid4()
+        pool = await get_pool()
+        async with pool.acquire() as connection:
+            await connection.execute(
+                """
+                insert into refund_status_snapshots (
+                    id, thread_id, user_id, assessment_year, status, refund_amount,
+                    portal_ref, issued_at, processed_at, refund_mode, bank_masked,
+                    source, observation_json
+                )
+                values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb)
+                """,
+                record_id,
+                thread_id,
+                user_id,
+                assessment_year,
+                status,
+                refund_amount,
+                portal_ref,
+                _normalize_timestamp(issued_at),
+                _normalize_timestamp(processed_at),
+                refund_mode,
+                bank_masked,
+                source,
+                json.dumps(observation, sort_keys=True),
+            )
+        latest = await self.latest_refund_status(thread_id)
+        if not latest:
+            raise KeyError(thread_id)
+        return latest
+
+    async def latest_refund_status(self, thread_id: str) -> Optional[dict[str, Any]]:
+        pool = await get_pool()
+        async with pool.acquire() as connection:
+            row = await connection.fetchrow(
+                """
+                select id, thread_id, user_id, assessment_year, status, refund_amount,
+                       portal_ref, issued_at, processed_at, refund_mode, bank_masked,
+                       source, observation_json::text as observation_json, observed_at
+                from refund_status_snapshots
+                where thread_id = $1
+                order by observed_at desc
+                limit 1
+                """,
+                thread_id,
+            )
+        return self._serialize_refund_status(row) if row else None
+
     async def list_consents(self, thread_id: str) -> list[dict[str, Any]]:
         pool = await get_pool()
         async with pool.acquire() as connection:
@@ -525,6 +860,64 @@ class FilingRuntimeService:
             "granted_at": row["granted_at"].isoformat() if row["granted_at"] else None,
             "revoked_at": row["revoked_at"].isoformat() if row["revoked_at"] else None,
             "response_hash": row["response_hash"],
+        }
+
+    def _serialize_year_over_year(self, row: Record) -> dict[str, Any]:
+        return {
+            "record_id": str(row["id"]),
+            "thread_id": row["thread_id"],
+            "user_id": row["user_id"],
+            "current_assessment_year": row["current_assessment_year"],
+            "prior_thread_id": row["prior_thread_id"],
+            "prior_assessment_year": row["prior_assessment_year"],
+            "comparison": json.loads(row["comparison_json"] or "{}"),
+            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+        }
+
+    def _serialize_next_ay_checklist(self, row: Record) -> dict[str, Any]:
+        return {
+            "record_id": str(row["id"]),
+            "thread_id": row["thread_id"],
+            "user_id": row["user_id"],
+            "current_assessment_year": row["current_assessment_year"],
+            "target_assessment_year": row["target_assessment_year"],
+            "items": json.loads(row["checklist_json"] or "[]"),
+            "summary": json.loads(row["summary_json"] or "{}"),
+            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+            "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+        }
+
+    def _serialize_notice_preparation(self, row: Record) -> dict[str, Any]:
+        return {
+            "record_id": str(row["id"]),
+            "thread_id": row["thread_id"],
+            "user_id": row["user_id"],
+            "notice_type": row["notice_type"],
+            "assessment_year": row["assessment_year"],
+            "source_storage_uri": row["source_storage_uri"],
+            "extracted": json.loads(row["extracted_json"] or "{}"),
+            "explanation_md": row["explanation_md"],
+            "suggested_response": json.loads(row["suggested_response_json"] or "{}"),
+            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+            "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+        }
+
+    def _serialize_refund_status(self, row: Record) -> dict[str, Any]:
+        return {
+            "record_id": str(row["id"]),
+            "thread_id": row["thread_id"],
+            "user_id": row["user_id"],
+            "assessment_year": row["assessment_year"],
+            "status": row["status"],
+            "refund_amount": _decimal_to_float(row["refund_amount"]),
+            "portal_ref": row["portal_ref"],
+            "issued_at": row["issued_at"].isoformat() if row["issued_at"] else None,
+            "processed_at": row["processed_at"].isoformat() if row["processed_at"] else None,
+            "refund_mode": row["refund_mode"],
+            "bank_masked": row["bank_masked"],
+            "source": row["source"],
+            "observation": json.loads(row["observation_json"] or "{}"),
+            "observed_at": row["observed_at"].isoformat() if row["observed_at"] else None,
         }
 
     def _render_itrv_placeholder(

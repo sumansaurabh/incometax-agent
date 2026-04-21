@@ -149,6 +149,19 @@ export const pageCatalog: StaticAdapterDefinition[] = [
     ]),
   },
   {
+    key: "refund-status",
+    keywords: ["refund status", "demand and refund status", "know your refund", "refund banker", "refund reissue"],
+    schema: schema([
+      ["refund_status", "Refund Status", true, "#refundStatus, [data-testid='refundStatus'], [name='refundStatus'], [data-field='refund_status']"],
+      ["refund_amount", "Refund Amount", false, "#refundAmount, [data-testid='refundAmount'], [name='refundAmount'], [data-field='refund_amount']"],
+      ["refund_reference", "Refund Reference", false, "#refundReference, [data-testid='refundReference'], [name='refundReference'], [data-field='refund_reference']"],
+      ["issued_at", "Issued Date", false, "#refundIssuedAt, [data-testid='refundIssuedAt'], [name='refundIssuedAt'], [data-field='issued_at']"],
+      ["processed_at", "Processed Date", false, "#refundProcessedAt, [data-testid='refundProcessedAt'], [name='refundProcessedAt'], [data-field='processed_at']"],
+      ["refund_mode", "Refund Mode", false, "#refundMode, [data-testid='refundMode'], [name='refundMode'], [data-field='refund_mode']"],
+      ["bank_account_masked", "Bank Account", false, "#refundBankAccount, [data-testid='refundBankAccount'], [name='refundBankAccount'], [data-field='bank_account_masked']"],
+    ]),
+  },
+  {
     key: "everify",
     keywords: ["everify", "e verify", "verification"],
     schema: schema([["verification_method", "Verification Method", true]]),

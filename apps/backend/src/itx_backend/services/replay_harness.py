@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Optional
 import hashlib
 
 
@@ -37,7 +37,7 @@ class ReplayHarness:
         page_type: str,
         dom_html: str,
         url: str,
-        metadata: dict[str, Any] | None = None,
+        metadata: Optional[dict[str, Any]] = None,
     ) -> ReplaySnapshot:
         raw = f"{thread_id}:{page_type}:{url}:{datetime.now(timezone.utc).isoformat()}"
         snapshot_id = hashlib.sha256(raw.encode()).hexdigest()[:20]
@@ -84,7 +84,7 @@ class ReplayHarness:
         self._runs.append(run)
         return run
 
-    def list_snapshots(self, thread_id: str | None = None) -> list[dict[str, Any]]:
+    def list_snapshots(self, thread_id: Optional[str] = None) -> list[dict[str, Any]]:
         items = self._snapshots.values()
         if thread_id:
             items = [s for s in items if s.thread_id == thread_id]

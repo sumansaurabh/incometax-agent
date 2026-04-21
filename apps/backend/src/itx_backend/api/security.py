@@ -1,3 +1,5 @@
+from typing import Optional
+
 from fastapi import APIRouter
 from fastapi import HTTPException
 from pydantic import BaseModel
@@ -17,7 +19,7 @@ class QuarantineRequest(BaseModel):
 
 
 class ResumeQuarantineRequest(BaseModel):
-    note: str | None = None
+    note: Optional[str] = None
 
 
 @router.get("/anomalies")

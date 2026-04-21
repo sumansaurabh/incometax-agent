@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any, Optional
 
 from .base import BaseRecord
 
@@ -9,6 +10,6 @@ from .base import BaseRecord
 class FilingAuditTrail(BaseRecord):
     ay_id: str = ""
     event: str = ""
-    payload: dict | None = None
+    payload: Optional[dict[str, Any]] = None
     rule_version: str = "v1"
     adapter_version: str = "v1"

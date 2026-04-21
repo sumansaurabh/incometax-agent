@@ -20,6 +20,8 @@ type Props = {
   onPrepareEVerify: (method: string) => void;
   onStartEVerify: (method: string) => void;
   onCompleteEVerify: (portalRef: string) => void;
+  onAttachOfficialArtifact: (manualText: string, ackNo: string, portalRef: string, filedAt: string) => void;
+  onCaptureOfficialArtifactPage: (ackNo: string, portalRef: string, filedAt: string) => void;
   onCreateRevision: (reason: string) => void;
   onRevokeConsent: (consentId: string) => void;
   onOpenArtifact: (artifactName: "itr-v" | "offline-json" | "evidence-bundle" | "summary") => void;
@@ -60,6 +62,8 @@ export function SubmissionPane({
   onPrepareEVerify,
   onStartEVerify,
   onCompleteEVerify,
+  onAttachOfficialArtifact,
+  onCaptureOfficialArtifactPage,
   onCreateRevision,
   onRevokeConsent,
   onOpenArtifact,
@@ -68,6 +72,8 @@ export function SubmissionPane({
   const [portalRef, setPortalRef] = useState(everification?.portal_ref ?? "");
   const [everifyMethod, setEverifyMethod] = useState(everification?.method ?? "aadhaar_otp");
   const [revisionReason, setRevisionReason] = useState("");
+  const [officialArtifactText, setOfficialArtifactText] = useState("");
+  const [officialFiledAt, setOfficialFiledAt] = useState(artifacts?.filed_at ?? "");
 
   useEffect(() => {
     setAckNo(artifacts?.ack_no ?? "");
@@ -80,6 +86,14 @@ export function SubmissionPane({
   useEffect(() => {
     setEverifyMethod(everification?.method ?? "aadhaar_otp");
   }, [everification?.method]);
+
+  useEffect(() => {
+    setOfficialFiledAt(artifacts?.filed_at ?? "");
+  }, [artifacts?.filed_at]);
+
+  const officialItrvAttached = Boolean(
+    artifacts?.artifact_manifest && typeof artifacts.artifact_manifest["official_itr_v_storage_uri"] === "string"
+  );
 
   return (
     <section>
@@ -137,7 +151,38 @@ export function SubmissionPane({
           <p><button disabled={isBusy} onClick={() => onOpenArtifact("summary")}>Download summary</button></p>
           <p><button disabled={isBusy} onClick={() => onOpenArtifact("offline-json")}>Download offline JSON</button></p>
           <p><button disabled={isBusy} onClick={() => onOpenArtifact("evidence-bundle")}>Download evidence bundle</button></p>
-          <p><button disabled={isBusy} onClick={() => onOpenArtifact("itr-v")}>Download archived ITR-V bundle</button></p>
+          <p><button disabled={isBusy} onClick={() => onOpenArtifact("itr-v")}>{officialItrvAttached ? "Download official ITR-V" : "Download archived ITR-V bundle"}</button></p>
+        </div>
+      ) : null}
+
+      {artifacts ? (
+        <div>
+          <h4>Official Portal Artifact</h4>
+          <textarea
+            rows={5}
+            value={officialArtifactText}
+            onChange={(event) => setOfficialArtifactText(event.target.value)}
+            placeholder="Paste the official ITR-V or acknowledgement text from the portal"
+          />
+          <input value={officialFiledAt} onChange={(event) => setOfficialFiledAt(event.target.value)} placeholder="Filed at (optional ISO timestamp)" />
+          <p>
+            <button disabled={isBusy} onClick={() => onCaptureOfficialArtifactPage(ackNo, portalRef, officialFiledAt)}>
+              Capture current portal page
+            </button>
+          </p>
+          <p>
+            <button
+              disabled={isBusy || !officialArtifactText.trim()}
+              onClick={() => onAttachOfficialArtifact(officialArtifactText, ackNo, portalRef, officialFiledAt)}
+            >
+              Attach pasted official artifact
+            </button>
+          </p>
+          <p>
+            {officialItrvAttached
+              ? "Official ITR-V is attached and will be used for future downloads."
+              : "Current ITR-V download is still the archived placeholder until an official artifact is attached."}
+          </p>
         </div>
       ) : null}
 
