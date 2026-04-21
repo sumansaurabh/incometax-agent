@@ -26,7 +26,7 @@ class ReplayRequest(BaseModel):
 @router.post("/capture")
 async def capture(payload: CaptureSnapshotRequest) -> dict:
     await require_thread_state(payload.thread_id)
-    snapshot = replay_harness.capture_snapshot(
+    snapshot = await replay_harness.capture_snapshot(
         thread_id=payload.thread_id,
         page_type=payload.page_type,
         dom_html=payload.dom_html,
@@ -42,7 +42,7 @@ async def capture(payload: CaptureSnapshotRequest) -> dict:
 
 @router.post("/run")
 async def replay(payload: ReplayRequest) -> dict:
-    run = replay_harness.replay(payload.snapshot_id, payload.expected_selectors)
+    run = await replay_harness.replay(payload.snapshot_id, payload.expected_selectors)
     return {
         "run_id": run.run_id,
         "success": run.success,
@@ -55,10 +55,10 @@ async def replay(payload: ReplayRequest) -> dict:
 async def snapshots(thread_id: Optional[str] = None) -> dict:
     if thread_id is not None:
         await require_thread_state(thread_id)
-        return {"items": replay_harness.list_snapshots(thread_id=thread_id)}
-    return {"items": replay_harness.list_snapshots(thread_id=thread_id)}
+        return {"items": await replay_harness.list_snapshots(thread_id=thread_id)}
+    return {"items": await replay_harness.list_snapshots(thread_id=thread_id)}
 
 
 @router.get("/runs")
 async def runs() -> dict:
-    return {"items": replay_harness.list_runs()}
+    return {"items": await replay_harness.list_runs()}

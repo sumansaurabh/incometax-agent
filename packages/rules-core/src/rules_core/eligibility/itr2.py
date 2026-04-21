@@ -1,2 +1,15 @@
-def eligible(has_capital_gains: bool, no_business_income: bool) -> bool:
-    return has_capital_gains and no_business_income
+def eligible(
+    has_capital_gains: bool,
+    no_business_income: bool = True,
+    resident: bool = True,
+    total_income: float = 0.0,
+    has_multiple_house_properties: bool = False,
+    has_foreign_assets: bool = False,
+) -> bool:
+    return no_business_income and (
+        has_capital_gains
+        or has_multiple_house_properties
+        or has_foreign_assets
+        or total_income > 5000000.0
+        or not resident
+    )

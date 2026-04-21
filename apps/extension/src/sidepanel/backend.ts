@@ -302,6 +302,15 @@ export type PurgeJob = {
   details?: Record<string, unknown>;
 };
 
+export type ConsentCatalogItem = {
+  purpose: string;
+  title: string;
+  required: boolean;
+  description: string;
+  consent_text: string;
+  scope: Record<string, unknown>;
+};
+
 export type ValidationHelpItem = {
   field: string;
   field_label: string;
@@ -862,6 +871,29 @@ export async function revokeConsent(input: {
       consent_id: input.consentId,
       reason: input.reason ?? "user_revoked_consent",
       process_immediately: true,
+    }),
+  });
+}
+
+export async function fetchConsentCatalog(): Promise<{ items: ConsentCatalogItem[] }> {
+  return request("/api/filing/consents/catalog");
+}
+
+export async function grantOnboardingConsents(input: {
+  threadId: string;
+  purposes: string[];
+}): Promise<{
+  thread_id: string;
+  user_id: string;
+  granted: Array<Record<string, unknown>>;
+  consents: Array<Record<string, unknown>>;
+  required_purposes: string[];
+}> {
+  return request("/api/filing/consents/grant", {
+    method: "POST",
+    body: JSON.stringify({
+      thread_id: input.threadId,
+      items: input.purposes.map((purpose) => ({ purpose })),
     }),
   });
 }

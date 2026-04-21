@@ -17,7 +17,7 @@ class TrackEventRequest(BaseModel):
 @router.post("/track")
 async def track(payload: TrackEventRequest) -> dict[str, str]:
     await require_thread_state(payload.thread_id)
-    analytics_service.track(
+    await analytics_service.track(
         event_type=payload.event_type,
         stage=payload.stage,
         thread_id=payload.thread_id,
@@ -29,10 +29,10 @@ async def track(payload: TrackEventRequest) -> dict[str, str]:
 @router.get("/dashboard")
 async def dashboard() -> dict:
     get_request_auth(required=True)
-    return analytics_service.dashboard()
+    return await analytics_service.dashboard()
 
 
 @router.get("/timeline/{thread_id}")
 async def timeline(thread_id: str) -> dict:
     await require_thread_state(thread_id)
-    return {"items": analytics_service.timeline(thread_id)}
+    return {"items": await analytics_service.timeline(thread_id)}

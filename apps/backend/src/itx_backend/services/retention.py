@@ -7,6 +7,7 @@ from typing import Any, Optional
 
 from itx_backend.config import settings
 from itx_backend.db.session import get_pool
+from itx_backend.services.analytics import analytics_service
 from itx_backend.services.document_storage import document_storage
 from itx_backend.services.replay_harness import replay_harness
 
@@ -214,7 +215,8 @@ class RetentionService:
                 if row[key] and document_storage.delete(row[key]):
                     deleted_paths += 1
 
-        replay_harness.purge_thread(thread_id)
+        await analytics_service.purge_thread(thread_id)
+        await replay_harness.purge_thread(thread_id)
 
         async with pool.acquire() as connection:
             async with connection.transaction():

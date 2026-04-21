@@ -31,9 +31,9 @@ async def start_thread(payload: ThreadStartRequest) -> AgentState:
     if not user_id:
         raise ValueError("user_id_required")
     state = AgentState(thread_id=str(uuid.uuid4()), user_id=user_id)
-    analytics_service.track("thread_started", "bootstrap", state.thread_id, {"user_id": user_id})
+    await analytics_service.track("thread_started", "bootstrap", state.thread_id, {"user_id": user_id})
     final_state = await graph.run(state)
-    analytics_service.track("thread_completed", "archive", state.thread_id, {"archived": final_state.archived})
+    await analytics_service.track("thread_completed", "archive", state.thread_id, {"archived": final_state.archived})
     return final_state
 
 
@@ -49,7 +49,7 @@ async def ensure_thread(payload: ThreadEnsureRequest) -> AgentState:
 
     state = AgentState(thread_id=payload.thread_id or str(uuid.uuid4()), user_id=user_id)
     await checkpointer.save(state)
-    analytics_service.track("thread_ensured", "bootstrap", state.thread_id, {"user_id": user_id})
+    await analytics_service.track("thread_ensured", "bootstrap", state.thread_id, {"user_id": user_id})
     return state
 
 

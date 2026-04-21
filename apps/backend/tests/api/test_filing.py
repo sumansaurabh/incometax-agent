@@ -10,6 +10,8 @@ from itx_backend.agent.state import AgentState
 from itx_backend.api.actions import ActionDecision, decision
 from itx_backend.api.filing import (
     CompleteSubmissionRequest,
+    ConsentGrantItem,
+    ConsentGrantRequest,
     ConsentRevokeRequest,
     EVerifyCompleteRequest,
     EVerifyPrepareRequest,
@@ -24,6 +26,7 @@ from itx_backend.api.filing import (
     NoticePreparationRequest,
     YearOverYearRequest,
     attach_official_artifact,
+    consent_catalog,
     confirm_itr_u,
     get_itr_u_state,
     prepare_itr_u,
@@ -34,6 +37,7 @@ from itx_backend.api.filing import (
     create_revision,
     filing_state,
     generate_summary,
+    grant_consents,
     next_ay_checklist,
     prepare_notice,
     prepare_everify,
@@ -192,6 +196,47 @@ class FilingApiTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(revoked["purge_job"]["status"], "completed")
         self.assertEqual(await checkpointer.latest("thread-filing-1"), None)
+
+    async def test_onboarding_consents_catalog_and_grants_persist(self) -> None:
+        self._bind_auth("user-consent")
+        await checkpointer.save(
+            AgentState(
+                thread_id="thread-consent-1",
+                user_id="user-consent",
+                itr_type="ITR-1",
+                tax_facts={"assessment_year": "2025-26", "name": "Consent Example"},
+            )
+        )
+
+        catalog = await consent_catalog()
+        self.assertGreaterEqual(len(catalog["items"]), 5)
+
+        granted = await grant_consents(
+            ConsentGrantRequest(
+                thread_id="thread-consent-1",
+                items=[
+                    ConsentGrantItem(purpose="fill_portal"),
+                    ConsentGrantItem(purpose="submit_return"),
+                ],
+            )
+        )
+        self.assertEqual({item["purpose"] for item in granted["granted"]}, {"fill_portal", "submit_return"})
+
+        duplicate = await grant_consents(
+            ConsentGrantRequest(
+                thread_id="thread-consent-1",
+                items=[ConsentGrantItem(purpose="fill_portal")],
+            )
+        )
+        active_fill_portal = [
+            consent for consent in duplicate["consents"] if consent["purpose"] == "fill_portal" and consent.get("revoked_at") is None
+        ]
+        self.assertEqual(len(active_fill_portal), 1)
+
+        filing = await filing_state("thread-consent-1")
+        active_purposes = {consent["purpose"] for consent in filing["consents"] if consent.get("revoked_at") is None}
+        self.assertIn("fill_portal", active_purposes)
+        self.assertIn("submit_return", active_purposes)
 
     async def test_revision_creates_new_thread_record(self) -> None:
         self._bind_auth("user-2")

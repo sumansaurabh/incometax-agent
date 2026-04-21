@@ -1,5 +1,7 @@
 # Plan And Use-Case Coverage Audit
 
+Historical note: parts of this document reflect an earlier implementation checkpoint. For the current verified repo state, read `docs/CURRENT_GAP_AUDIT.md` first.
+
 Date: 2026-04-22
 
 ## Status Legend

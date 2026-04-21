@@ -4,6 +4,7 @@ import {
   ApprovalItem,
   attachOfficialArtifact,
   AuthIdentity,
+  ConsentCatalogItem,
   DetectedField,
   EverificationRecord,
   ExecutionRecord,
@@ -29,6 +30,7 @@ import {
   createRevisionThread,
   decideApproval,
   ensureThread,
+  fetchConsentCatalog,
   fetchCurrentIdentity,
   fetchFilingState,
   generateNextAyChecklist,
@@ -40,6 +42,7 @@ import {
   filingArtifactUrl,
   generateSubmissionSummary,
   generateYearOverYearComparison,
+  grantOnboardingConsents,
   loginToBackend,
   normalizeApprovalItems,
   prepareEVerifyApproval,
@@ -56,6 +59,7 @@ import {
   undoExecution,
 } from "./backend";
 import { ChatPane } from "./panes/ChatPane";
+import { ConsentOnboardingPane } from "./panes/ConsentOnboardingPane";
 import { DetectedDetailsPane } from "./panes/DetectedDetailsPane";
 import { PendingActionsPane } from "./panes/PendingActionsPane";
 import { EvidencePane } from "./panes/EvidencePane";
@@ -209,6 +213,8 @@ export default function App(): JSX.Element {
   const [identity, setIdentity] = useState<AuthIdentity | null>(null);
   const [authEmail, setAuthEmail] = useState("");
   const [trustStatus, setTrustStatus] = useState<TrustStatus | null>(null);
+  const [consentCatalog, setConsentCatalog] = useState<ConsentCatalogItem[]>([]);
+  const [selectedConsentPurposes, setSelectedConsentPurposes] = useState<string[]>([]);
   const [consents, setConsents] = useState<Array<Record<string, unknown>>>([]);
   const [purgeJobs, setPurgeJobs] = useState<PurgeJob[]>([]);
   const [supportAssessment, setSupportAssessment] = useState<SupportAssessment | null>(null);
@@ -235,6 +241,25 @@ export default function App(): JSX.Element {
     setMessages((prev) => [...prev, message]);
   };
 
+  const activeConsentPurposes = new Set(
+    consents
+      .filter((consent) => !consent.revoked_at)
+      .map((consent) => String(consent.purpose ?? ""))
+      .filter(Boolean)
+  );
+  const requiredConsentPurposes = consentCatalog.filter((item) => item.required).map((item) => item.purpose);
+  const missingRequiredConsentPurposes = requiredConsentPurposes.filter((purpose) => !activeConsentPurposes.has(purpose));
+
+  const ensureConsentPurposes = (purposes: string[], actionLabel: string): boolean => {
+    const missing = purposes.filter((purpose) => !activeConsentPurposes.has(purpose));
+    if (missing.length === 0) {
+      return true;
+    }
+    const labels = consentCatalog.filter((item) => missing.includes(item.purpose)).map((item) => item.title);
+    appendMessage(`${actionLabel} is blocked until you grant: ${labels.join(", ")}.`);
+    return false;
+  };
+
   const resetThreadState = () => {
     setFillPlan(null);
     setApprovals([]);
@@ -251,6 +276,7 @@ export default function App(): JSX.Element {
     setIsArchived(false);
     setNextRevisionNumber(1);
     setFacts([]);
+    setSelectedConsentPurposes([]);
     setConsents([]);
     setPurgeJobs([]);
     setSupportAssessment(null);
@@ -374,6 +400,8 @@ export default function App(): JSX.Element {
       }
 
       setAuthSession(storedAuth);
+      const catalog = await fetchConsentCatalog();
+      setConsentCatalog(catalog.items ?? []);
       const me = await fetchCurrentIdentity();
       setIdentity(me);
       await bootstrapThread(me.user_id);
@@ -415,9 +443,54 @@ export default function App(): JSX.Element {
     void refreshContextualInsights(session.threadId, pageContext);
   }, [pageContext, session?.threadId]);
 
+  useEffect(() => {
+    if (consentCatalog.length === 0) {
+      return;
+    }
+    setSelectedConsentPurposes((previous) => {
+      const optionalSelections = previous.filter(
+        (purpose) => consentCatalog.some((item) => item.purpose === purpose && !item.required) && !activeConsentPurposes.has(purpose)
+      );
+      return Array.from(new Set([...missingRequiredConsentPurposes, ...optionalSelections]));
+    });
+  }, [consentCatalog, consents]);
+
+  const handleToggleConsentPurpose = (purpose: string) => {
+    setSelectedConsentPurposes((previous) =>
+      previous.includes(purpose) ? previous.filter((value) => value !== purpose) : [...previous, purpose]
+    );
+  };
+
+  const handleGrantSelectedConsents = async () => {
+    if (!session) {
+      return;
+    }
+    const purposes = Array.from(new Set(selectedConsentPurposes)).filter((purpose) => !activeConsentPurposes.has(purpose));
+    if (purposes.length === 0) {
+      appendMessage("No new consents are selected.");
+      return;
+    }
+
+    setIsBusy(true);
+    try {
+      const result = await grantOnboardingConsents({ threadId: session.threadId, purposes });
+      setConsents(result.consents ?? []);
+      setSelectedConsentPurposes((previous) => previous.filter((purpose) => !purposes.includes(purpose)));
+      appendMessage(`Granted ${result.granted.length} onboarding consent(s) for this thread.`);
+      await refreshBackendState(session.threadId);
+    } catch (error: unknown) {
+      appendMessage(`Consent grant failed: ${error instanceof Error ? error.message : "unknown error"}`);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
   const handlePreparePage = async () => {
     if (!session || !trustStatus?.canOperate) {
       appendMessage(trustStatus?.message ?? "Open the official portal to prepare a fill plan.");
+      return;
+    }
+    if (!ensureConsentPurposes(["fill_portal"], "Fill-plan preparation")) {
       return;
     }
     if (supportAssessment && !supportAssessment.can_autofill) {
@@ -471,6 +544,9 @@ export default function App(): JSX.Element {
       if (!trustStatus?.canOperate) {
         appendMessage(trustStatus?.message ?? "Open the official portal to execute approved actions.");
       }
+      return;
+    }
+    if (!ensureConsentPurposes(["fill_portal"], "Approved autofill execution")) {
       return;
     }
     if (supportAssessment && !supportAssessment.can_autofill) {
@@ -566,6 +642,9 @@ export default function App(): JSX.Element {
       }
       return;
     }
+    if (!ensureConsentPurposes(["fill_portal"], "Undoing the last fill batch")) {
+      return;
+    }
 
     const lastFillExecution = executions.find((execution) => execution.execution_kind === "fill" && execution.success);
     if (!lastFillExecution) {
@@ -623,6 +702,9 @@ export default function App(): JSX.Element {
     if (!session) {
       return;
     }
+    if (!ensureConsentPurposes(["submit_return"], "Submission summary preparation")) {
+      return;
+    }
 
     setIsBusy(true);
     try {
@@ -640,6 +722,9 @@ export default function App(): JSX.Element {
 
   const handlePrepareSubmit = async () => {
     if (!session) {
+      return;
+    }
+    if (!ensureConsentPurposes(["submit_return"], "Submission approval preparation")) {
       return;
     }
     if (supportAssessment && !supportAssessment.can_submit) {
@@ -661,6 +746,9 @@ export default function App(): JSX.Element {
 
   const handleCompleteSubmission = async (ackNo: string, portalRef: string) => {
     if (!session) {
+      return;
+    }
+    if (!ensureConsentPurposes(["submit_return"], "Submission completion")) {
       return;
     }
     if (supportAssessment && !supportAssessment.can_submit) {
@@ -690,6 +778,9 @@ export default function App(): JSX.Element {
     if (!session) {
       return;
     }
+    if (!ensureConsentPurposes(["submit_return"], "Official artifact attachment")) {
+      return;
+    }
     setIsBusy(true);
     try {
       const result = await attachOfficialArtifact({
@@ -711,6 +802,9 @@ export default function App(): JSX.Element {
 
   const handleCaptureOfficialArtifactPage = async (ackNo: string, portalRef: string, filedAt: string) => {
     if (!session) {
+      return;
+    }
+    if (!ensureConsentPurposes(["submit_return"], "Official artifact capture")) {
       return;
     }
     const snapshot = await refreshSnapshot();
@@ -744,6 +838,9 @@ export default function App(): JSX.Element {
     if (!session) {
       return;
     }
+    if (!ensureConsentPurposes(["submit_return"], "E-verification approval preparation")) {
+      return;
+    }
     if (supportAssessment && !supportAssessment.can_submit) {
       appendMessage(`E-verification is paused: ${supportAssessment.reasons[0]?.title ?? "resolve the guided checklist first"}.`);
       return;
@@ -763,6 +860,9 @@ export default function App(): JSX.Element {
 
   const handleStartEVerify = async (method: string) => {
     if (!session) {
+      return;
+    }
+    if (!ensureConsentPurposes(["submit_return"], "E-verification handoff")) {
       return;
     }
     if (supportAssessment && !supportAssessment.can_submit) {
@@ -799,6 +899,9 @@ export default function App(): JSX.Element {
     if (!session || !everification?.handoff_id) {
       return;
     }
+    if (!ensureConsentPurposes(["submit_return"], "E-verification completion")) {
+      return;
+    }
 
     setIsBusy(true);
     try {
@@ -821,6 +924,9 @@ export default function App(): JSX.Element {
 
   const handleCreateRevision = async (reason: string) => {
     if (!session) {
+      return;
+    }
+    if (!ensureConsentPurposes(["submit_return"], "Revision preparation")) {
       return;
     }
 
@@ -1049,6 +1155,9 @@ export default function App(): JSX.Element {
     if (!session) {
       return;
     }
+    if (!ensureConsentPurposes(["regime_compare"], "Regime comparison")) {
+      return;
+    }
     setIsBusy(true);
     try {
       const preview = await fetchRegimePreview(session.threadId);
@@ -1063,6 +1172,9 @@ export default function App(): JSX.Element {
 
   const handlePrepareRecommendedRegime = async () => {
     if (!session || !regimePreview) {
+      return;
+    }
+    if (!ensureConsentPurposes(["regime_compare", "fill_portal"], "Recommended regime switch preparation")) {
       return;
     }
     if (supportAssessment && !supportAssessment.can_autofill) {
@@ -1093,6 +1205,9 @@ export default function App(): JSX.Element {
     if (!session) {
       return;
     }
+    if (!ensureConsentPurposes(["share_with_reviewer"], "Reviewer or CA handoff preparation")) {
+      return;
+    }
     setIsBusy(true);
     try {
       const handoff = await prepareReviewHandoff({ threadId: session.threadId });
@@ -1107,6 +1222,9 @@ export default function App(): JSX.Element {
 
   const handleRequestReviewerSignoff = async (approvalId: string) => {
     if (!session) {
+      return;
+    }
+    if (!ensureConsentPurposes(["share_with_reviewer"], "Reviewer sign-off request")) {
       return;
     }
     if (!reviewerEmail.trim()) {
@@ -1222,6 +1340,16 @@ export default function App(): JSX.Element {
       </button>
       {trustStatus ? <p>Portal trust: {trustStatus.message}</p> : null}
       {session ? <p>Thread: {session.threadId.slice(0, 8)}</p> : null}
+      {session && consentCatalog.length > 0 ? (
+        <ConsentOnboardingPane
+          items={consentCatalog}
+          activePurposes={activeConsentPurposes}
+          selectedPurposes={new Set(selectedConsentPurposes)}
+          isBusy={isBusy}
+          onTogglePurpose={handleToggleConsentPurpose}
+          onGrantSelected={() => void handleGrantSelectedConsents()}
+        />
+      ) : null}
       <DetectedDetailsPane
         page={page}
         fields={detectedFields}

@@ -26,6 +26,7 @@ The agent does **not** replace the official filing system. It reads the current 
 | [PLAN.md](./PLAN.md) | Phase-by-phase engineering roadmap (Phase 0 → Phase 5) with deliverables and exit criteria |
 | [USE_CASES.md](./USE_CASES.md) | 50+ concrete user-facing use cases the system can fulfill |
 | [SECURITY.md](./SECURITY.md) | DPDP posture, PII handling, key management, anti-phishing, audit trail |
+| [CURRENT_GAP_AUDIT.md](./CURRENT_GAP_AUDIT.md) | Verified current-state audit: what is actually complete, what is partial, and what still blocks market readiness |
 
 ## Non-negotiables
 

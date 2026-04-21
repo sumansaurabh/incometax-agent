@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+import uuid
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException
@@ -27,6 +29,7 @@ from itx_backend.services.post_filing import (
     prepare_notice_response,
     select_prior_filed_state,
 )
+from itx_backend.services.consent import onboarding_catalog, onboarding_definition, onboarding_response_hash
 from itx_backend.services.regime_advisor import compare_regimes
 from itx_backend.services.retention import retention_service
 
@@ -92,6 +95,16 @@ class ConsentRevokeRequest(BaseModel):
     consent_id: str
     reason: str = "user_revoked_consent"
     process_immediately: bool = True
+
+
+class ConsentGrantItem(BaseModel):
+    purpose: str
+    scope: Optional[dict[str, Any]] = None
+
+
+class ConsentGrantRequest(BaseModel):
+    thread_id: str
+    items: list[ConsentGrantItem]
 
 
 class RegimePreviewRequest(BaseModel):
@@ -453,6 +466,64 @@ async def revoke_consent(payload: ConsentRevokeRequest) -> dict[str, Any]:
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="consent_not_found") from exc
     return revoked
+
+
+@router.get("/consents/catalog")
+async def consent_catalog() -> dict[str, Any]:
+    return {"items": onboarding_catalog()}
+
+
+@router.post("/consents/grant")
+async def grant_consents(payload: ConsentGrantRequest) -> dict[str, Any]:
+    state = await require_thread_state(payload.thread_id)
+    auth = get_request_auth(required=True)
+    existing = await filing_runtime.list_consents(payload.thread_id)
+    active_purposes = {
+        str(consent.get("purpose"))
+        for consent in existing
+        if consent.get("revoked_at") in (None, "")
+    }
+
+    for item in payload.items:
+        if item.purpose in active_purposes:
+            continue
+        try:
+            definition = onboarding_definition(item.purpose)
+        except KeyError as exc:
+            raise HTTPException(status_code=400, detail="unknown_consent_purpose") from exc
+
+        consent_text = str(definition["consent_text"])
+        scope = {**definition.get("scope", {}), **(item.scope or {})}
+        await filing_runtime.record_consent(
+            thread_id=payload.thread_id,
+            user_id=auth.user_id,
+            purpose=item.purpose,
+            approval_key=f"onboarding:{payload.thread_id}:{item.purpose}:{uuid.uuid4()}",
+            scope=scope,
+            consent_text=consent_text,
+            response_hash=onboarding_response_hash(
+                thread_id=payload.thread_id,
+                user_id=auth.user_id,
+                purpose=item.purpose,
+                consent_text=consent_text,
+            ),
+            granted_at=datetime.now(timezone.utc),
+        )
+        active_purposes.add(item.purpose)
+
+    refreshed = await filing_runtime.list_consents(payload.thread_id)
+    requested = {item.purpose for item in payload.items}
+    return {
+        "thread_id": payload.thread_id,
+        "user_id": state.user_id,
+        "granted": [
+            consent
+            for consent in refreshed
+            if consent.get("purpose") in requested and consent.get("revoked_at") in (None, "")
+        ],
+        "consents": refreshed,
+        "required_purposes": [entry["purpose"] for entry in onboarding_catalog() if entry.get("required")],
+    }
 
 
 @router.post("/regime-preview")

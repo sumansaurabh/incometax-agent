@@ -27,6 +27,7 @@ from itx_backend.security.request_auth import reset_request_auth, set_request_au
 from itx_backend.security.rate_limit import FixedWindowRateLimiter
 from itx_backend.services.auth_runtime import AuthError, auth_runtime
 from itx_backend.services.retention import retention_service
+from itx_backend.services.startup_health import startup_health_service
 from itx_backend.telemetry.tracing import setup_tracing
 
 
@@ -36,6 +37,7 @@ limiter = FixedWindowRateLimiter(limit=500)
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     await init_connection_pool()
+    await startup_health_service.validate_startup()
     try:
         yield
     finally:
@@ -99,8 +101,8 @@ def create_app() -> FastAPI:
     app.include_router(websocket.router)
 
     @app.get("/health")
-    async def health() -> dict[str, str]:
-        return {"status": "ok"}
+    async def health() -> dict[str, object]:
+        return await startup_health_service.run_checks()
 
     return app
 
