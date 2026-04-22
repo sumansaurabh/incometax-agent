@@ -1,73 +1,44 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+
+import "./styles/tokens.css";
+import "./styles/chat.css";
 
 import {
   ApprovalItem,
-  attachOfficialArtifact,
   AuthIdentity,
   BackendError,
+  ChatApiMessage,
   ConsentCatalogItem,
-  DetectedField,
-  EverificationRecord,
-  ExecutionRecord,
-  FilingArtifacts,
-  FillAction,
   FillPlan,
-  NextAyChecklistRecord,
-  NoticePreparationRecord,
   PageContextPayload,
-  PurgeJob,
   RegimePreview,
-  RefundStatusRecord,
   SupportAssessment,
-  SubmissionSummaryData,
-  ValidationError,
-  ValidationHelpItem,
-  YearOverYearRecord,
-  captureRefundStatus,
-  completeEVerify,
-  completeSubmission,
-  counterConsentReviewerSignoff,
+  ThreadDocument,
   createProposal,
-  createRevisionThread,
   decideApproval,
   ensureThread,
+  fetchChatMessages,
   fetchConsentCatalog,
   fetchCurrentIdentity,
   fetchFilingState,
-  generateNextAyChecklist,
   fetchRegimePreview,
   fetchSupportAssessment,
   fetchTaxFacts,
   fetchThreadActions,
-  fetchValidationHelp,
-  filingArtifactUrl,
-  generateSubmissionSummary,
-  generateYearOverYearComparison,
+  fetchThreadDocuments,
   grantOnboardingConsents,
   loginToBackend,
   normalizeApprovalItems,
-  prepareEVerifyApproval,
-  prepareNoticeResponse,
-  prepareReviewHandoff,
-  prepareSubmissionApproval,
-  recordExecution,
-  requestReviewerSignoff,
-  reviewHandoffPackageUrl,
-  resumeThreadQuarantine,
-  revokeConsent,
   revokeCurrentSession,
-  startEVerifyHandoff,
-  undoExecution,
+  searchDocuments,
+  sendChatMessage,
+  uploadDocumentFile,
 } from "./backend";
 import { ChatPane } from "./panes/ChatPane";
-import { ConsentOnboardingPane } from "./panes/ConsentOnboardingPane";
-import { DetectedDetailsPane } from "./panes/DetectedDetailsPane";
-import { PendingActionsPane } from "./panes/PendingActionsPane";
-import { EvidencePane } from "./panes/EvidencePane";
-import { PostFilingPane } from "./panes/PostFilingPane";
-import { SubmissionPane } from "./panes/SubmissionPane";
-import { SupportPane } from "./panes/SupportPane";
-import { clearSidepanelSession, SidepanelSession, loadSidepanelSession, saveSidepanelSession } from "./session";
+import { SettingsDrawer } from "./components/SettingsDrawer";
+import { WelcomeScreen } from "./components/WelcomeScreen";
+import { ChatCard, ChatMessage, UploadedDocument } from "./components/chat-types";
+import { clearSidepanelSession, loadSidepanelSession, saveSidepanelSession, SidepanelSession } from "./session";
 import {
   AuthSession,
   clearAuthSession,
@@ -76,27 +47,6 @@ import {
   loadAuthSession,
   saveAuthSession,
 } from "../shared/auth-session";
-
-type EvidenceSource = {
-  documentId: string;
-  documentName: string;
-  documentType: "form16" | "ais" | "tis" | "form16a" | "bank_statement" | "other";
-  snippet?: string;
-};
-
-type EvidenceFact = {
-  factId: string;
-  fieldName: string;
-  displayLabel: string;
-  value: string | number;
-  formattedValue: string;
-  category: "income" | "deduction" | "tax_paid" | "personal" | "bank";
-  confidence: number;
-  extractorVersion: string;
-  sources: EvidenceSource[];
-  validationStatus: "valid" | "warning" | "error" | "unverified";
-  lastUpdated: string;
-};
 
 type RuntimeResponse<T> = {
   ok: boolean;
@@ -112,82 +62,67 @@ type TrustStatus = {
   message: string;
 };
 
-type ActionBatchPayload = {
-  results: Array<{
-    action: { type: string; selector: string; value?: string };
-    output: unknown;
-    readAfterWrite?: { ok: boolean; observedValue: string };
-  }>;
-  validationErrors: ValidationError[];
-  pageContext: PageContextPayload;
-};
+const PILOT_MODE = true;
+const CHAT_STORAGE_PREFIX = "itx_sidepanel_chat:";
 
-function mapDocumentType(value: unknown): EvidenceSource["documentType"] {
-  const documentType = String(value ?? "other").toLowerCase();
-  if (documentType.startsWith("ais")) return "ais";
-  if (documentType.startsWith("tis")) return "tis";
-  if (documentType === "form16") return "form16";
-  if (documentType === "form16a") return "form16a";
-  if (documentType.includes("bank")) return "bank_statement";
-  return "other";
+function newId(prefix: string): string {
+  return `${prefix}-${crypto.randomUUID()}`;
 }
 
-function inferCategory(path: string): EvidenceFact["category"] {
-  if (path.startsWith("deductions")) return "deduction";
-  if (path.startsWith("tax_paid")) return "tax_paid";
-  if (path.startsWith("bank")) return "bank";
-  if (["name", "pan", "dob", "father_name", "mobile", "email"].includes(path)) return "personal";
-  return "income";
-}
-
-function formatFactValue(path: string, value: unknown): string {
-  if (typeof value === "number" && !["pan", "mobile", "ifsc"].includes(path.split(".").at(-1) ?? "")) {
-    return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(value);
-  }
-  return String(value);
-}
-
-function flattenFacts(
-  value: Record<string, unknown>,
-  factEvidence: Record<string, Array<Record<string, unknown>>>,
-  prefix = ""
-): EvidenceFact[] {
-  return Object.entries(value).flatMap(([key, nestedValue]) => {
-    const path = prefix ? `${prefix}.${key}` : key;
-    if (nestedValue && typeof nestedValue === "object" && !Array.isArray(nestedValue)) {
-      return flattenFacts(nestedValue as Record<string, unknown>, factEvidence, path);
-    }
-
-    const evidenceEntries = factEvidence[path] ?? [];
-    const primaryEvidence = evidenceEntries[0] ?? {};
-    return [
+function makeWelcomeMessage(): ChatMessage {
+  return {
+    id: newId("welcome"),
+    role: "agent",
+    createdAt: new Date().toISOString(),
+    content: "Hi! I'm your IncomeTax filing assistant. Type **File my income tax return** to get started.",
+    cards: [
       {
-        factId: path,
-        fieldName: path,
-        displayLabel: key.replace(/_/g, " "),
-        value: typeof nestedValue === "number" || typeof nestedValue === "string" ? nestedValue : JSON.stringify(nestedValue),
-        formattedValue: formatFactValue(path, nestedValue),
-        category: inferCategory(path),
-        confidence: Number(primaryEvidence.confidence ?? 0.8),
-        extractorVersion: String(primaryEvidence.extractor_version ?? "phase2"),
-        sources: evidenceEntries.map((entry, index) => ({
-          documentId: String(entry.document_id ?? `${path}-${index}`),
-          documentName: String(entry.document_name ?? entry.document_type ?? "Document"),
-          documentType: mapDocumentType(entry.document_type),
-          snippet: typeof entry.snippet === "string" ? entry.snippet : undefined,
-        })),
-        validationStatus: Number(primaryEvidence.confidence ?? 0.8) >= 0.9 ? "valid" : "unverified",
-        lastUpdated: new Date().toISOString(),
+        id: "welcome-actions",
+        kind: "welcome",
+        title: "What do you want to do?",
+        body: "Start with a filing request or upload Form 16, AIS, TIS, bank, deduction, and proof documents.",
+        actions: [
+          { id: "start-filing", label: "File my return", variant: "primary" },
+          { id: "upload-documents", label: "Upload documents" },
+          { id: "refund-status", label: "Check refund" },
+          { id: "compare-regimes", label: "Compare regimes" },
+        ],
       },
-    ];
-  });
+    ],
+  };
 }
 
-function flattenPlanActions(fillPlan: FillPlan | null): FillAction[] {
-  if (!fillPlan) {
-    return [];
+function mapServerMessage(message: ChatApiMessage): ChatMessage {
+  const metadataCards = Array.isArray(message.metadata?.cards) ? (message.metadata.cards as ChatCard[]) : [];
+  return {
+    id: message.id,
+    role: message.role,
+    content: message.content,
+    createdAt: message.created_at,
+    status: message.role === "user" ? "delivered" : undefined,
+    cards: metadataCards,
+  };
+}
+
+function mapDocument(document: ThreadDocument): UploadedDocument {
+  return {
+    documentId: document.document_id,
+    fileName: document.file_name,
+    documentType: document.document_type,
+    status: document.status,
+    uploadedAt: document.uploaded_at,
+    parsedAt: document.parsed_at,
+  };
+}
+
+function countLeafFacts(value: unknown): number {
+  if (!value || typeof value !== "object") {
+    return value === undefined || value === null || value === "" ? 0 : 1;
   }
-  return fillPlan.pages.flatMap((page) => page.actions.map((action) => ({ ...action, page_type: action.page_type ?? page.page_type })));
+  if (Array.isArray(value)) {
+    return value.reduce<number>((count, item) => count + countLeafFacts(item), 0);
+  }
+  return Object.values(value as Record<string, unknown>).reduce<number>((count, item) => count + countLeafFacts(item), 0);
 }
 
 async function sendRuntimeMessage<T>(message: unknown): Promise<T> {
@@ -202,13 +137,18 @@ async function sendRuntimeMessage<T>(message: unknown): Promise<T> {
   });
 }
 
+async function loadStoredMessages(threadId: string): Promise<ChatMessage[] | null> {
+  const stored = await chrome.storage.local.get(`${CHAT_STORAGE_PREFIX}${threadId}`);
+  const value = stored[`${CHAT_STORAGE_PREFIX}${threadId}`];
+  return Array.isArray(value) ? (value as ChatMessage[]) : null;
+}
+
+async function saveStoredMessages(threadId: string, messages: ChatMessage[]): Promise<void> {
+  await chrome.storage.local.set({ [`${CHAT_STORAGE_PREFIX}${threadId}`]: messages.slice(-100) });
+}
+
 export default function App(): JSX.Element {
-  const [messages, setMessages] = useState<string[]>(["IncomeTax Agent ready."]);
-  const [page, setPage] = useState("unknown");
-  const [detectedFields, setDetectedFields] = useState<DetectedField[]>([]);
-  const [validationErrors, setValidationErrors] = useState<ValidationError[]>([]);
-  const [pageContext, setPageContext] = useState<PageContextPayload | null>(null);
-  const [facts, setFacts] = useState<EvidenceFact[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [session, setSession] = useState<SidepanelSession | null>(null);
   const [authSession, setAuthSession] = useState<AuthSession | null>(null);
   const [identity, setIdentity] = useState<AuthIdentity | null>(null);
@@ -216,96 +156,44 @@ export default function App(): JSX.Element {
   const [authPassword, setAuthPassword] = useState("");
   const [authError, setAuthError] = useState<string | null>(null);
   const [trustStatus, setTrustStatus] = useState<TrustStatus | null>(null);
+  const [pageContext, setPageContext] = useState<PageContextPayload | null>(null);
   const [consentCatalog, setConsentCatalog] = useState<ConsentCatalogItem[]>([]);
-  const [selectedConsentPurposes, setSelectedConsentPurposes] = useState<string[]>([]);
   const [consents, setConsents] = useState<Array<Record<string, unknown>>>([]);
-  const [purgeJobs, setPurgeJobs] = useState<PurgeJob[]>([]);
-  const [supportAssessment, setSupportAssessment] = useState<SupportAssessment | null>(null);
-  const [validationHelp, setValidationHelp] = useState<ValidationHelpItem[]>([]);
-  const [regimePreview, setRegimePreview] = useState<RegimePreview | null>(null);
+  const [documents, setDocuments] = useState<UploadedDocument[]>([]);
   const [fillPlan, setFillPlan] = useState<FillPlan | null>(null);
   const [approvals, setApprovals] = useState<ApprovalItem[]>([]);
-  const [approvedActions, setApprovedActions] = useState<string[]>([]);
-  const [executions, setExecutions] = useState<ExecutionRecord[]>([]);
-  const [submissionSummary, setSubmissionSummary] = useState<SubmissionSummaryData | null>(null);
-  const [submissionStatus, setSubmissionStatus] = useState("draft");
-  const [filingArtifacts, setFilingArtifacts] = useState<FilingArtifacts | null>(null);
-  const [everification, setEverification] = useState<EverificationRecord | null>(null);
-  const [yearOverYear, setYearOverYear] = useState<YearOverYearRecord | null>(null);
-  const [nextAyChecklist, setNextAyChecklist] = useState<NextAyChecklistRecord | null>(null);
-  const [noticePreparations, setNoticePreparations] = useState<NoticePreparationRecord[]>([]);
-  const [refundStatus, setRefundStatus] = useState<RefundStatusRecord | null>(null);
-  const [reviewerEmail, setReviewerEmail] = useState("");
-  const [isArchived, setIsArchived] = useState(false);
-  const [nextRevisionNumber, setNextRevisionNumber] = useState(1);
+  const [supportAssessment, setSupportAssessment] = useState<SupportAssessment | null>(null);
+  const [regimePreview, setRegimePreview] = useState<RegimePreview | null>(null);
+  const [factCount, setFactCount] = useState(0);
   const [isBusy, setIsBusy] = useState(false);
+  const [isTyping, setIsTyping] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
-  const appendMessage = (message: string) => {
-    setMessages((prev) => [...prev, message]);
+  const appendMessages = (nextMessages: ChatMessage[]) => {
+    setMessages((previous) => [...previous, ...nextMessages]);
   };
 
-  const activeConsentPurposes = new Set(
-    consents
-      .filter((consent) => !consent.revoked_at)
-      .map((consent) => String(consent.purpose ?? ""))
-      .filter(Boolean)
-  );
-  const requiredConsentPurposes = consentCatalog.filter((item) => item.required).map((item) => item.purpose);
-  const missingRequiredConsentPurposes = requiredConsentPurposes.filter((purpose) => !activeConsentPurposes.has(purpose));
-
-  const ensureConsentPurposes = (purposes: string[], actionLabel: string): boolean => {
-    const missing = purposes.filter((purpose) => !activeConsentPurposes.has(purpose));
-    if (missing.length === 0) {
-      return true;
-    }
-    const labels = consentCatalog.filter((item) => missing.includes(item.purpose)).map((item) => item.title);
-    appendMessage(`${actionLabel} is blocked until you grant: ${labels.join(", ")}.`);
-    return false;
+  const appendAgentMessage = (content: string, cards?: ChatCard[]) => {
+    appendMessages([
+      {
+        id: newId("agent"),
+        role: "agent",
+        content,
+        cards,
+        createdAt: new Date().toISOString(),
+      },
+    ]);
   };
 
-  const resetThreadState = () => {
-    setFillPlan(null);
-    setApprovals([]);
-    setApprovedActions([]);
-    setExecutions([]);
-    setSubmissionSummary(null);
-    setSubmissionStatus("draft");
-    setFilingArtifacts(null);
-    setEverification(null);
-    setYearOverYear(null);
-    setNextAyChecklist(null);
-    setNoticePreparations([]);
-    setRefundStatus(null);
-    setIsArchived(false);
-    setNextRevisionNumber(1);
-    setFacts([]);
-    setSelectedConsentPurposes([]);
-    setConsents([]);
-    setPurgeJobs([]);
-    setSupportAssessment(null);
-    setValidationHelp([]);
-    setRegimePreview(null);
-  };
-
-  const applyPageContext = (context: PageContextPayload) => {
-    setPageContext(context);
-    setPage(context.page ?? "unknown");
-    setDetectedFields(context.fields ?? []);
-    setValidationErrors(context.validationErrors ?? []);
-  };
-
-  const refreshSnapshot = async (): Promise<PageContextPayload | null> => {
-    try {
-      const response = await sendRuntimeMessage<RuntimeResponse<PageContextPayload>>({ type: "snapshot_active_page", payload: {} });
-      if (!response.ok || !response.payload) {
-        return null;
-      }
-      applyPageContext(response.payload);
-      return response.payload;
-    } catch (error: unknown) {
-      appendMessage(`Snapshot unavailable: ${error instanceof Error ? error.message : "unknown error"}`);
-      return null;
-    }
+  const appendErrorMessage = (content: string) => {
+    appendMessages([
+      {
+        id: newId("error"),
+        role: "error",
+        content,
+        createdAt: new Date().toISOString(),
+      },
+    ]);
   };
 
   const refreshTrust = async () => {
@@ -319,74 +207,74 @@ export default function App(): JSX.Element {
     }
   };
 
-  const refreshContextualInsights = async (threadId: string, context: PageContextPayload) => {
-    if (context.validationErrors.length > 0) {
-      try {
-        const translated = await fetchValidationHelp({
-          threadId,
-          pageType: context.page,
-          portalState: context.portalState,
-          validationErrors: context.validationErrors,
-        });
-        setValidationHelp(translated.items ?? []);
-      } catch (error: unknown) {
-        appendMessage(`Validation help unavailable: ${error instanceof Error ? error.message : "unknown error"}`);
+  const refreshSnapshot = async (): Promise<PageContextPayload | null> => {
+    try {
+      const response = await sendRuntimeMessage<RuntimeResponse<PageContextPayload>>({ type: "snapshot_active_page", payload: {} });
+      if (!response.ok || !response.payload) {
+        return null;
       }
-    } else {
-      setValidationHelp([]);
-    }
-
-    if (context.page === "regime-choice") {
-      try {
-        setRegimePreview(await fetchRegimePreview(threadId));
-      } catch (error: unknown) {
-        appendMessage(`Regime preview unavailable: ${error instanceof Error ? error.message : "unknown error"}`);
-        setRegimePreview(null);
-      }
-    } else {
-      setRegimePreview(null);
+      setPageContext(response.payload);
+      return response.payload;
+    } catch {
+      return null;
     }
   };
 
   const refreshBackendState = async (threadId: string) => {
-    const [actionsPayload, taxFactsPayload, filingPayload, supportPayload] = await Promise.all([
+    const [actionsResult, supportResult, documentsResult, factsResult, filingResult] = await Promise.allSettled([
       fetchThreadActions(threadId),
+      fetchSupportAssessment(threadId),
+      fetchThreadDocuments(threadId),
       fetchTaxFacts(threadId),
       fetchFilingState(threadId),
-      fetchSupportAssessment(threadId),
     ]);
-    setFillPlan(actionsPayload.fill_plan);
-    setApprovals(normalizeApprovalItems(actionsPayload));
-    setApprovedActions(actionsPayload.approved_actions ?? []);
-    setExecutions(actionsPayload.executions ?? []);
-    setFacts(flattenFacts(taxFactsPayload.facts ?? {}, taxFactsPayload.fact_evidence ?? {}));
-    setSubmissionSummary(filingPayload.submission_summary);
-    setSubmissionStatus(filingPayload.submission_status ?? "draft");
-    setFilingArtifacts(filingPayload.artifacts);
-    setEverification(filingPayload.everification);
-    setIsArchived(Boolean(filingPayload.archived));
-    setNextRevisionNumber(Number((filingPayload.revision?.revision_number as number | undefined) ?? 0) + 1);
-    setConsents(filingPayload.consents ?? []);
-    setPurgeJobs((filingPayload.purge_jobs ?? []) as PurgeJob[]);
-    setYearOverYear(filingPayload.year_over_year ?? null);
-    setNextAyChecklist(filingPayload.next_ay_checklist ?? null);
-    setNoticePreparations(filingPayload.notices ?? []);
-    setRefundStatus(filingPayload.refund_status ?? null);
-    setSupportAssessment(supportPayload);
+
+    if (actionsResult.status === "fulfilled") {
+      setFillPlan(actionsResult.value.fill_plan);
+      setApprovals(normalizeApprovalItems(actionsResult.value));
+    }
+    if (supportResult.status === "fulfilled") {
+      setSupportAssessment(supportResult.value);
+    }
+    if (documentsResult.status === "fulfilled") {
+      setDocuments(documentsResult.value.documents.map(mapDocument));
+    }
+    if (factsResult.status === "fulfilled") {
+      setFactCount(countLeafFacts(factsResult.value.facts));
+    }
+    if (filingResult.status === "fulfilled") {
+      setConsents(filingResult.value.consents ?? []);
+    }
   };
 
-  const bootstrapThread = async (userId: string) => {
+  const loadChatForThread = async (threadId: string) => {
+    const serverMessages = await fetchChatMessages(threadId).catch(() => null);
+    if (serverMessages?.messages.length) {
+      setMessages(serverMessages.messages.map(mapServerMessage));
+      return;
+    }
+
+    const storedMessages = await loadStoredMessages(threadId).catch(() => null);
+    setMessages(storedMessages?.length ? storedMessages : [makeWelcomeMessage()]);
+  };
+
+  const autoGrantPilotConsents = async (threadId: string, catalog: ConsentCatalogItem[]) => {
+    if (!PILOT_MODE || catalog.length === 0) {
+      return;
+    }
+    const purposes = Array.from(new Set(catalog.map((item) => item.purpose)));
+    const result = await grantOnboardingConsents({ threadId, purposes });
+    setConsents(result.consents ?? []);
+  };
+
+  const bootstrapThread = async (userId: string, catalog: ConsentCatalogItem[]) => {
     const storedSession = await loadSidepanelSession();
     const ensured = await ensureThread(userId, storedSession?.threadId ?? null);
     const nextSession = { threadId: ensured.thread_id, userId: ensured.user_id };
     await saveSidepanelSession(nextSession);
     setSession(nextSession);
-    const snapshot = await refreshSnapshot();
-    if (snapshot) {
-      await refreshContextualInsights(nextSession.threadId, snapshot);
-    }
-    await refreshBackendState(nextSession.threadId);
-    appendMessage(`Thread ready: ${nextSession.threadId.slice(0, 8)}`);
+    await autoGrantPilotConsents(nextSession.threadId, catalog).catch(() => undefined);
+    await Promise.all([refreshSnapshot(), refreshBackendState(nextSession.threadId), loadChatForThread(nextSession.threadId)]);
   };
 
   const initialize = async () => {
@@ -398,21 +286,17 @@ export default function App(): JSX.Element {
         setAuthSession(null);
         setIdentity(null);
         setSession(null);
-        resetThreadState();
+        setMessages([]);
         return;
       }
 
       setAuthSession(storedAuth);
-      const catalog = await fetchConsentCatalog();
+      const [catalog, me] = await Promise.all([fetchConsentCatalog(), fetchCurrentIdentity()]);
       setConsentCatalog(catalog.items ?? []);
-      const me = await fetchCurrentIdentity();
       setIdentity(me);
-      await bootstrapThread(me.user_id);
+      await bootstrapThread(me.user_id, catalog.items ?? []);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "unknown error";
-      // Only wipe the auth session when the backend actively rejects us.
-      // Transient failures (network, 5xx) should leave the session alone so
-      // the user can retry without re-entering their password.
       const isAuthFailure =
         error instanceof BackendError
           ? error.isAuthFailure()
@@ -423,11 +307,10 @@ export default function App(): JSX.Element {
         setAuthSession(null);
         setIdentity(null);
         setSession(null);
-        resetThreadState();
+        setMessages([]);
         setAuthError("Your session ended. Please sign in again.");
-        appendMessage("Session ended — please sign in again.");
       } else {
-        appendMessage(`Could not reach backend: ${message}. The session is still active — retry shortly.`);
+        appendErrorMessage(`Could not reach backend: ${message}. Retry shortly.`);
       }
     } finally {
       setIsBusy(false);
@@ -436,14 +319,17 @@ export default function App(): JSX.Element {
 
   useEffect(() => {
     const listener = (msg: { type?: string; payload?: any }) => {
-      if (msg.type === "backend_message") {
-        setMessages((prev) => [...prev, `Agent: ${JSON.stringify(msg.payload)}`]);
-      }
       if (msg.type === "page_detected" || msg.type === "page_context") {
-        applyPageContext(msg.payload as PageContextPayload);
+        setPageContext(msg.payload as PageContextPayload);
       }
       if (msg.type === "trust_status") {
         setTrustStatus(msg.payload as TrustStatus);
+      }
+      if (msg.type === "backend_message" && msg.payload?.type === "chat_response") {
+        const payload = msg.payload.payload as ChatApiMessage | undefined;
+        if (payload) {
+          appendMessages([mapServerMessage(payload)]);
+        }
       }
     };
 
@@ -453,642 +339,91 @@ export default function App(): JSX.Element {
   }, []);
 
   useEffect(() => {
-    if (!session?.threadId || !pageContext) {
-      return;
-    }
-    void refreshContextualInsights(session.threadId, pageContext);
-  }, [pageContext, session?.threadId]);
+    if (!session?.threadId || messages.length === 0) return;
+    void saveStoredMessages(session.threadId, messages);
+  }, [messages, session?.threadId]);
 
-  useEffect(() => {
-    if (consentCatalog.length === 0) {
-      return;
+  const contextualCards = useMemo<ChatCard[]>(() => {
+    const cards: ChatCard[] = [];
+    const indexedCount = documents.filter((document) => document.status === "indexed").length;
+    const parsedCount = documents.filter((document) => ["parsed", "indexed"].includes(document.status)).length;
+    const pendingApprovals = approvals.filter((approval) => approval.status === "pending");
+
+    if (documents.length > 0) {
+      cards.push({
+        id: "documents-status",
+        kind: "document",
+        title: "Uploaded documents",
+        body: "The agent can search indexed and parsed documents while preparing the return.",
+        meta: [
+          { label: "Uploaded", value: String(documents.length) },
+          { label: "Parsed", value: String(parsedCount) },
+          { label: "Indexed", value: String(indexedCount) },
+          { label: "Facts", value: String(factCount) },
+        ],
+        actions: [{ id: "search-documents", label: "Search documents", variant: "secondary" }],
+      });
     }
-    setSelectedConsentPurposes((previous) => {
-      const optionalSelections = previous.filter(
-        (purpose) => consentCatalog.some((item) => item.purpose === purpose && !item.required) && !activeConsentPurposes.has(purpose)
-      );
-      return Array.from(new Set([...missingRequiredConsentPurposes, ...optionalSelections]));
+
+    if (fillPlan) {
+      cards.push({
+        id: "fill-plan",
+        kind: "action",
+        title: "Portal fill plan ready",
+        body: "Review approvals in chat before the agent touches the official portal.",
+        meta: [
+          { label: "Actions", value: String(fillPlan.total_actions) },
+          { label: "Pages", value: String(fillPlan.pages.length) },
+        ],
+        actions: [{ id: "prepare-fill", label: "Refresh plan", variant: "secondary" }],
+      });
+    }
+
+    pendingApprovals.slice(0, 3).forEach((approval) => {
+      cards.push({
+        id: `approval-${approval.approvalId}`,
+        kind: "approval",
+        title: approval.description,
+        body: "Pilot mode still asks before executing material portal actions.",
+        meta: [
+          { label: "Kind", value: approval.kind },
+          { label: "Actions", value: String(approval.actionIds.length) },
+        ],
+        actions: [
+          { id: `approve:${approval.approvalId}`, label: "Approve", variant: "primary" },
+          { id: `reject:${approval.approvalId}`, label: "Reject", variant: "secondary" },
+        ],
+      });
     });
-  }, [consentCatalog, consents]);
 
-  const handleToggleConsentPurpose = (purpose: string) => {
-    setSelectedConsentPurposes((previous) =>
-      previous.includes(purpose) ? previous.filter((value) => value !== purpose) : [...previous, purpose]
-    );
-  };
-
-  const handleGrantSelectedConsents = async () => {
-    if (!session) {
-      return;
-    }
-    const purposes = Array.from(new Set(selectedConsentPurposes)).filter((purpose) => !activeConsentPurposes.has(purpose));
-    if (purposes.length === 0) {
-      appendMessage("No new consents are selected.");
-      return;
-    }
-
-    setIsBusy(true);
-    try {
-      const result = await grantOnboardingConsents({ threadId: session.threadId, purposes });
-      setConsents(result.consents ?? []);
-      setSelectedConsentPurposes((previous) => previous.filter((purpose) => !purposes.includes(purpose)));
-      appendMessage(`Granted ${result.granted.length} onboarding consent(s) for this thread.`);
-      await refreshBackendState(session.threadId);
-    } catch (error: unknown) {
-      appendMessage(`Consent grant failed: ${error instanceof Error ? error.message : "unknown error"}`);
-    } finally {
-      setIsBusy(false);
-    }
-  };
-
-  const handlePreparePage = async () => {
-    if (!session || !trustStatus?.canOperate) {
-      appendMessage(trustStatus?.message ?? "Open the official portal to prepare a fill plan.");
-      return;
-    }
-    if (!ensureConsentPurposes(["fill_portal"], "Fill-plan preparation")) {
-      return;
-    }
-    if (supportAssessment && !supportAssessment.can_autofill) {
-      appendMessage(`Assisted autofill is paused: ${supportAssessment.reasons[0]?.title ?? "manual review is required"}.`);
-      return;
-    }
-
-    setIsBusy(true);
-    try {
-      const snapshot = (await refreshSnapshot()) ?? pageContext;
-      const pageType = snapshot?.page ?? page;
-      const proposal = await createProposal({
-        threadId: session.threadId,
-        pageType,
-        portalState: snapshot?.portalState ?? pageContext?.portalState ?? null,
+    if (supportAssessment && (!supportAssessment.can_autofill || !supportAssessment.can_submit)) {
+      cards.push({
+        id: "support-assessment",
+        kind: "error",
+        title: "Review needed",
+        body: supportAssessment.reasons[0]?.title ?? "The filing thread has a support blocker.",
+        meta: [
+          { label: "Mode", value: supportAssessment.mode },
+          { label: "Blockers", value: String(supportAssessment.blocking_issues.length) },
+        ],
       });
-      setFillPlan(proposal.fill_plan);
-      appendMessage(`Prepared ${proposal.fill_plan?.total_actions ?? 0} action(s) for ${pageType}.`);
-      await refreshBackendState(session.threadId);
-    } catch (error: unknown) {
-      appendMessage(`Proposal failed: ${error instanceof Error ? error.message : "unknown error"}`);
-    } finally {
-      setIsBusy(false);
-    }
-  };
-
-  const handleApproval = async (approvalId: string, approved: boolean) => {
-    if (!session) {
-      return;
     }
 
-    setIsBusy(true);
-    try {
-      await decideApproval({
-        threadId: session.threadId,
-        approvalId,
-        approved,
-        rejectionReason: approved ? undefined : "Rejected from extension sidepanel",
+    if (regimePreview) {
+      cards.push({
+        id: "regime-preview",
+        kind: "summary",
+        title: `Recommended regime: ${regimePreview.recommended_regime}`,
+        body: regimePreview.rationale[0] ?? "Regime comparison has been calculated from available facts.",
+        meta: [
+          { label: "Old regime tax", value: `INR ${Math.round(regimePreview.old_regime.net_tax_liability).toLocaleString("en-IN")}` },
+          { label: "New regime tax", value: `INR ${Math.round(regimePreview.new_regime.net_tax_liability).toLocaleString("en-IN")}` },
+        ],
       });
-      appendMessage(`${approved ? "Approved" : "Rejected"} approval ${approvalId}.`);
-      await refreshBackendState(session.threadId);
-    } catch (error: unknown) {
-      appendMessage(`Approval update failed: ${error instanceof Error ? error.message : "unknown error"}`);
-    } finally {
-      setIsBusy(false);
-    }
-  };
-
-  const handleExecute = async () => {
-    if (!session || !fillPlan || !trustStatus?.canOperate) {
-      if (!trustStatus?.canOperate) {
-        appendMessage(trustStatus?.message ?? "Open the official portal to execute approved actions.");
-      }
-      return;
-    }
-    if (!ensureConsentPurposes(["fill_portal"], "Approved autofill execution")) {
-      return;
-    }
-    if (supportAssessment && !supportAssessment.can_autofill) {
-      appendMessage(`Execution is paused: ${supportAssessment.reasons[0]?.title ?? "manual review is required"}.`);
-      return;
-    }
-    const blockingReviewer = approvals.find(
-      (approval) => Boolean(approval.signoffId) && approval.reviewerStatus !== "client_approved" && approval.status === "approved"
-    );
-    if (blockingReviewer) {
-      appendMessage(
-        `Execution is waiting for reviewer sign-off on ${blockingReviewer.description.toLowerCase()} and your counter-consent.`
-      );
-      return;
     }
 
-    setIsBusy(true);
-    try {
-      const beforeSnapshot = await refreshSnapshot();
-      if (!beforeSnapshot?.portalState) {
-        throw new Error("Portal snapshot unavailable before execution");
-      }
-
-      const planActions = flattenPlanActions(fillPlan).filter(
-        (action) => action.requires_approval === false || approvedActions.includes(action.action_id)
-      );
-      if (planActions.length === 0) {
-        throw new Error("No approved actions are ready to execute");
-      }
-
-      const batchResponse = await sendRuntimeMessage<RuntimeResponse<ActionBatchPayload>>({
-        type: "run_action_batch",
-        payload: {
-          actions: planActions.map((action) => ({
-            type: "fill",
-            selector: action.selector,
-            value: String(action.value ?? ""),
-          })),
-        },
-      });
-      if (!batchResponse.ok || !batchResponse.payload) {
-        throw new Error(batchResponse.error ?? "Action batch failed");
-      }
-
-      const afterContext = batchResponse.payload.pageContext;
-      applyPageContext(afterContext);
-      const normalizedValidationErrors = (batchResponse.payload.validationErrors ?? []).map((error) => ({
-        field: error.field,
-        message: error.message,
-        parsed_reason: error.parsedReason ?? error.parsed_reason,
-      }));
-
-      const executionResults = planActions.map((action, index) => {
-        const batchResult = batchResponse.payload?.results[index];
-        const previousValue = beforeSnapshot.portalState.fields[action.selector]?.value ?? null;
-        const observedValue = afterContext.portalState.fields[action.selector]?.value ?? batchResult?.readAfterWrite?.observedValue ?? null;
-        const hasValidationError = normalizedValidationErrors.some((error) =>
-          [action.field_id, action.selector, action.field_label].includes(error.field)
-        );
-
-        return {
-          ...action,
-          result: hasValidationError ? "validation_error" : (batchResult?.readAfterWrite?.ok ? "ok" : "readback_mismatch"),
-          read_after_write: {
-            ok: Boolean(batchResult?.readAfterWrite?.ok) && !hasValidationError,
-            observed_value: observedValue,
-            previous_value: previousValue,
-          },
-        };
-      });
-
-      const recorded = await recordExecution({
-        threadId: session.threadId,
-        portalStateBefore: beforeSnapshot.portalState,
-        portalStateAfter: afterContext.portalState,
-        executionResults,
-        validationErrors: normalizedValidationErrors,
-      });
-
-      appendMessage(`Executed ${recorded.validation_summary.executed} action(s).`);
-      await refreshBackendState(session.threadId);
-    } catch (error: unknown) {
-      appendMessage(`Execution failed: ${error instanceof Error ? error.message : "unknown error"}`);
-    } finally {
-      setIsBusy(false);
-    }
-  };
-
-  const handleUndo = async () => {
-    if (!session || !trustStatus?.canOperate) {
-      if (!trustStatus?.canOperate) {
-        appendMessage(trustStatus?.message ?? "Open the official portal to undo a fill batch.");
-      }
-      return;
-    }
-    if (!ensureConsentPurposes(["fill_portal"], "Undoing the last fill batch")) {
-      return;
-    }
-
-    const lastFillExecution = executions.find((execution) => execution.execution_kind === "fill" && execution.success);
-    if (!lastFillExecution) {
-      return;
-    }
-
-    const revertibleActions = (lastFillExecution.results.executed_actions ?? []).filter(
-      (action) => action.selector && action.read_after_write && action.read_after_write.previous_value !== undefined
-    );
-    if (revertibleActions.length === 0) {
-      appendMessage("Nothing to undo for the last execution.");
-      return;
-    }
-
-    setIsBusy(true);
-    try {
-      const beforeUndo = await refreshSnapshot();
-      if (!beforeUndo?.portalState) {
-        throw new Error("Portal snapshot unavailable before undo");
-      }
-
-      const undoBatch = await sendRuntimeMessage<RuntimeResponse<ActionBatchPayload>>({
-        type: "run_action_batch",
-        payload: {
-          actions: revertibleActions.map((action) => ({
-            type: "fill",
-            selector: action.selector,
-            value: String(action.read_after_write?.previous_value ?? ""),
-          })),
-        },
-      });
-      if (!undoBatch.ok) {
-        throw new Error(undoBatch.error ?? "Undo batch failed");
-      }
-
-      const undone = await undoExecution({
-        threadId: session.threadId,
-        executionId: lastFillExecution.execution_id,
-        portalState: beforeUndo.portalState,
-      });
-      appendMessage(`Undo completed with execution ${undone.execution_id}.`);
-      const afterUndo = await refreshSnapshot();
-      if (afterUndo) {
-        applyPageContext(afterUndo);
-      }
-      await refreshBackendState(session.threadId);
-    } catch (error: unknown) {
-      appendMessage(`Undo failed: ${error instanceof Error ? error.message : "unknown error"}`);
-    } finally {
-      setIsBusy(false);
-    }
-  };
-
-  const handleGenerateSummary = async () => {
-    if (!session) {
-      return;
-    }
-    if (!ensureConsentPurposes(["submit_return"], "Submission summary preparation")) {
-      return;
-    }
-
-    setIsBusy(true);
-    try {
-      const result = await generateSubmissionSummary({ threadId: session.threadId, isFinal: true });
-      setSubmissionSummary(result.submission_summary);
-      setSubmissionStatus(result.submission_status);
-      appendMessage("Submission summary refreshed.");
-      await refreshBackendState(session.threadId);
-    } catch (error: unknown) {
-      appendMessage(`Summary generation failed: ${error instanceof Error ? error.message : "unknown error"}`);
-    } finally {
-      setIsBusy(false);
-    }
-  };
-
-  const handlePrepareSubmit = async () => {
-    if (!session) {
-      return;
-    }
-    if (!ensureConsentPurposes(["submit_return"], "Submission approval preparation")) {
-      return;
-    }
-    if (supportAssessment && !supportAssessment.can_submit) {
-      appendMessage(`Submission is paused: ${supportAssessment.reasons[0]?.title ?? "resolve the guided checklist first"}.`);
-      return;
-    }
-
-    setIsBusy(true);
-    try {
-      await prepareSubmissionApproval({ threadId: session.threadId, isFinal: true });
-      appendMessage("Submission approval requested.");
-      await refreshBackendState(session.threadId);
-    } catch (error: unknown) {
-      appendMessage(`Submission approval failed: ${error instanceof Error ? error.message : "unknown error"}`);
-    } finally {
-      setIsBusy(false);
-    }
-  };
-
-  const handleCompleteSubmission = async (ackNo: string, portalRef: string) => {
-    if (!session) {
-      return;
-    }
-    if (!ensureConsentPurposes(["submit_return"], "Submission completion")) {
-      return;
-    }
-    if (supportAssessment && !supportAssessment.can_submit) {
-      appendMessage(`Submission archive is paused: ${supportAssessment.reasons[0]?.title ?? "resolve the guided checklist first"}.`);
-      return;
-    }
-
-    setIsBusy(true);
-    try {
-      const result = await completeSubmission({
-        threadId: session.threadId,
-        ackNo,
-        portalRef,
-      });
-      setSubmissionStatus(result.submission_status);
-      setFilingArtifacts(result.artifacts);
-      appendMessage(`Submission archived${result.artifacts.ack_no ? ` with acknowledgement ${result.artifacts.ack_no}` : ""}.`);
-      await refreshBackendState(session.threadId);
-    } catch (error: unknown) {
-      appendMessage(`Submission archive failed: ${error instanceof Error ? error.message : "unknown error"}`);
-    } finally {
-      setIsBusy(false);
-    }
-  };
-
-  const handleAttachOfficialArtifact = async (manualText: string, ackNo: string, portalRef: string, filedAt: string) => {
-    if (!session) {
-      return;
-    }
-    if (!ensureConsentPurposes(["submit_return"], "Official artifact attachment")) {
-      return;
-    }
-    setIsBusy(true);
-    try {
-      const result = await attachOfficialArtifact({
-        threadId: session.threadId,
-        manualText,
-        ackNo,
-        portalRef,
-        filedAt,
-      });
-      setFilingArtifacts(result.artifacts);
-      appendMessage("Attached official filing artifact from pasted portal content.");
-      await refreshBackendState(session.threadId);
-    } catch (error: unknown) {
-      appendMessage(`Official artifact attachment failed: ${error instanceof Error ? error.message : "unknown error"}`);
-    } finally {
-      setIsBusy(false);
-    }
-  };
-
-  const handleCaptureOfficialArtifactPage = async (ackNo: string, portalRef: string, filedAt: string) => {
-    if (!session) {
-      return;
-    }
-    if (!ensureConsentPurposes(["submit_return"], "Official artifact capture")) {
-      return;
-    }
-    const snapshot = await refreshSnapshot();
-    if (!snapshot) {
-      appendMessage("Official artifact capture requires an active portal page.");
-      return;
-    }
-    setIsBusy(true);
-    try {
-      const result = await attachOfficialArtifact({
-        threadId: session.threadId,
-        pageType: snapshot.page,
-        pageTitle: snapshot.title,
-        pageUrl: snapshot.url,
-        portalState: snapshot.portalState,
-        ackNo,
-        portalRef,
-        filedAt,
-      });
-      setFilingArtifacts(result.artifacts);
-      appendMessage("Captured the current portal page as the official filing artifact.");
-      await refreshBackendState(session.threadId);
-    } catch (error: unknown) {
-      appendMessage(`Official artifact capture failed: ${error instanceof Error ? error.message : "unknown error"}`);
-    } finally {
-      setIsBusy(false);
-    }
-  };
-
-  const handlePrepareEVerify = async (method: string) => {
-    if (!session) {
-      return;
-    }
-    if (!ensureConsentPurposes(["submit_return", "everify_portal_handoff"], "E-verification approval preparation")) {
-      return;
-    }
-    if (supportAssessment && !supportAssessment.can_submit) {
-      appendMessage(`E-verification is paused: ${supportAssessment.reasons[0]?.title ?? "resolve the guided checklist first"}.`);
-      return;
-    }
-
-    setIsBusy(true);
-    try {
-      await prepareEVerifyApproval({ threadId: session.threadId, method });
-      appendMessage(`E-verify approval requested for ${method.replace(/_/g, " ")}.`);
-      await refreshBackendState(session.threadId);
-    } catch (error: unknown) {
-      appendMessage(`E-verify approval failed: ${error instanceof Error ? error.message : "unknown error"}`);
-    } finally {
-      setIsBusy(false);
-    }
-  };
-
-  const handleStartEVerify = async (method: string) => {
-    if (!session) {
-      return;
-    }
-    if (!ensureConsentPurposes(["submit_return", "everify_portal_handoff"], "E-verification handoff")) {
-      return;
-    }
-    if (supportAssessment && !supportAssessment.can_submit) {
-      appendMessage(`E-verification handoff is paused: ${supportAssessment.reasons[0]?.title ?? "resolve the guided checklist first"}.`);
-      return;
-    }
-
-    setIsBusy(true);
-    try {
-      const result = await startEVerifyHandoff({ threadId: session.threadId, method });
-      const targetUrl =
-        (typeof result.pending_navigation?.url === "string" ? result.pending_navigation.url : null) ??
-        (typeof result.everification?.target_url === "string" ? result.everification.target_url : null) ??
-        (typeof result.everify_handoff?.target_url === "string" ? result.everify_handoff.target_url : null);
-      if (targetUrl) {
-        const navigation = await sendRuntimeMessage<RuntimeResponse<{ tabId: number; url: string }>>({
-          type: "navigate_active_tab",
-          payload: { url: targetUrl },
-        });
-        if (!navigation.ok) {
-          throw new Error(navigation.error ?? "Failed to open e-verification page");
-        }
-      }
-      appendMessage(`Opened e-verification handoff for ${method.replace(/_/g, " ")}.`);
-      await refreshBackendState(session.threadId);
-    } catch (error: unknown) {
-      appendMessage(`E-verify handoff failed: ${error instanceof Error ? error.message : "unknown error"}`);
-    } finally {
-      setIsBusy(false);
-    }
-  };
-
-  const handleCompleteEVerify = async (portalRef: string) => {
-    if (!session || !everification?.handoff_id) {
-      return;
-    }
-    if (!ensureConsentPurposes(["submit_return", "everify_portal_handoff"], "E-verification completion")) {
-      return;
-    }
-
-    setIsBusy(true);
-    try {
-      const result = await completeEVerify({
-        threadId: session.threadId,
-        handoffId: everification.handoff_id,
-        portalRef,
-      });
-      setSubmissionStatus(result.submission_status);
-      setEverification(result.everification);
-      setIsArchived(Boolean(result.archived));
-      appendMessage("E-verification marked complete.");
-      await refreshBackendState(session.threadId);
-    } catch (error: unknown) {
-      appendMessage(`E-verification completion failed: ${error instanceof Error ? error.message : "unknown error"}`);
-    } finally {
-      setIsBusy(false);
-    }
-  };
-
-  const handleCreateRevision = async (reason: string) => {
-    if (!session) {
-      return;
-    }
-    if (!ensureConsentPurposes(["submit_return"], "Revision preparation")) {
-      return;
-    }
-
-    setIsBusy(true);
-    try {
-      const result = await createRevisionThread({
-        threadId: session.threadId,
-        reason,
-        revisionNumber: nextRevisionNumber,
-      });
-      const nextSession = { threadId: result.revision_thread_id, userId: session.userId };
-      await saveSidepanelSession(nextSession);
-      setSession(nextSession);
-      appendMessage(`Revision branch created: ${result.revision_thread_id.slice(0, 8)}`);
-      await refreshBackendState(nextSession.threadId);
-    } catch (error: unknown) {
-      appendMessage(`Revision creation failed: ${error instanceof Error ? error.message : "unknown error"}`);
-    } finally {
-      setIsBusy(false);
-    }
-  };
-
-  const handleGenerateYearOverYear = async () => {
-    if (!session) {
-      return;
-    }
-    setIsBusy(true);
-    try {
-      const result = await generateYearOverYearComparison(session.threadId);
-      setYearOverYear(result);
-      appendMessage("Year-over-year comparison refreshed.");
-      await refreshBackendState(session.threadId);
-    } catch (error: unknown) {
-      appendMessage(`Year-over-year comparison failed: ${error instanceof Error ? error.message : "unknown error"}`);
-    } finally {
-      setIsBusy(false);
-    }
-  };
-
-  const handleGenerateNextAyChecklist = async () => {
-    if (!session) {
-      return;
-    }
-    setIsBusy(true);
-    try {
-      const result = await generateNextAyChecklist(session.threadId);
-      setNextAyChecklist(result);
-      appendMessage(`Next-AY readiness checklist prepared for ${result.target_assessment_year}.`);
-      await refreshBackendState(session.threadId);
-    } catch (error: unknown) {
-      appendMessage(`Next-AY checklist failed: ${error instanceof Error ? error.message : "unknown error"}`);
-    } finally {
-      setIsBusy(false);
-    }
-  };
-
-  const handlePrepareNotice = async (noticeText: string) => {
-    if (!session) {
-      return;
-    }
-    setIsBusy(true);
-    try {
-      const result = await prepareNoticeResponse({
-        threadId: session.threadId,
-        noticeText,
-        noticeType: "143(1)",
-      });
-      setNoticePreparations((previous) => [result, ...previous.filter((item) => item.record_id !== result.record_id)]);
-      appendMessage("Prepared a read-only notice explanation and response checklist.");
-      await refreshBackendState(session.threadId);
-    } catch (error: unknown) {
-      appendMessage(`Notice preparation failed: ${error instanceof Error ? error.message : "unknown error"}`);
-    } finally {
-      setIsBusy(false);
-    }
-  };
-
-  const handleCaptureRefundStatusPage = async () => {
-    if (!session) {
-      return;
-    }
-    const snapshot = await refreshSnapshot();
-    if (!snapshot) {
-      appendMessage("Refund status capture requires an active portal page.");
-      return;
-    }
-    if (snapshot.page !== "refund-status") {
-      appendMessage("Open the refund-status page on the official portal or use the manual refund-status form.");
-      return;
-    }
-    setIsBusy(true);
-    try {
-      const result = await captureRefundStatus({
-        threadId: session.threadId,
-        pageType: snapshot.page,
-        pageTitle: snapshot.title,
-        pageUrl: snapshot.url,
-        portalState: snapshot.portalState,
-      });
-      setRefundStatus(result);
-      appendMessage(`Captured refund status: ${result.status}.`);
-      await refreshBackendState(session.threadId);
-    } catch (error: unknown) {
-      appendMessage(`Refund status capture failed: ${error instanceof Error ? error.message : "unknown error"}`);
-    } finally {
-      setIsBusy(false);
-    }
-  };
-
-  const handleSaveManualRefundStatus = async (input: {
-    status: string;
-    portalRef?: string;
-    refundAmount?: string;
-    issuedAt?: string;
-    processedAt?: string;
-    refundMode?: string;
-    bankMasked?: string;
-  }) => {
-    if (!session) {
-      return;
-    }
-    setIsBusy(true);
-    try {
-      const result = await captureRefundStatus({
-        threadId: session.threadId,
-        pageType: page,
-        pageTitle: pageContext?.title ?? null,
-        pageUrl: pageContext?.url ?? null,
-        portalState: pageContext?.portalState ?? null,
-        manualStatus: input.status,
-        manualPortalRef: input.portalRef,
-        manualRefundAmount: input.refundAmount,
-        manualIssuedAt: input.issuedAt,
-        manualProcessedAt: input.processedAt,
-        manualRefundMode: input.refundMode,
-        manualBankMasked: input.bankMasked,
-      });
-      setRefundStatus(result);
-      appendMessage(`Saved refund status: ${result.status}.`);
-      await refreshBackendState(session.threadId);
-    } catch (error: unknown) {
-      appendMessage(`Saving refund status failed: ${error instanceof Error ? error.message : "unknown error"}`);
-    } finally {
-      setIsBusy(false);
-    }
-  };
+    return cards;
+  }, [approvals, documents, factCount, fillPlan, regimePreview, supportAssessment]);
 
   const handleLogin = async () => {
     const email = authEmail.trim();
@@ -1110,13 +445,11 @@ export default function App(): JSX.Element {
       setAuthSession(nextAuth);
       setAuthPassword("");
       chrome.runtime.sendMessage({ type: "auth_session_updated" });
-      appendMessage(`Signed in as ${nextAuth.email}.`);
       await initialize();
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Sign-in failed.";
       setAuthPassword("");
       setAuthError(message);
-      appendMessage(`Sign-in failed: ${message}`);
     } finally {
       setIsBusy(false);
     }
@@ -1132,76 +465,107 @@ export default function App(): JSX.Element {
       setAuthSession(null);
       setIdentity(null);
       setSession(null);
-      resetThreadState();
-      appendMessage("Signed out and local session cleared.");
+      setMessages([]);
+      setDocuments([]);
+      setFillPlan(null);
+      setApprovals([]);
+      setSettingsOpen(false);
     } finally {
       setIsBusy(false);
     }
   };
 
-  const handleOpenArtifact = async (artifactName: "itr-v" | "offline-json" | "evidence-bundle" | "summary") => {
-    if (!session) {
-      return;
-    }
-    try {
-      const latestAuth = await loadAuthSession();
-      if (!latestAuth) {
-        throw new Error("Authentication required");
-      }
-      window.open(filingArtifactUrl(session.threadId, artifactName, latestAuth), "_blank", "noopener,noreferrer");
-    } catch (error: unknown) {
-      appendMessage(`Artifact download failed: ${error instanceof Error ? error.message : "unknown error"}`);
-    }
-  };
-
-  const handleRevokeConsent = async (consentId: string) => {
-    if (!session) {
-      return;
-    }
+  const handleNewConversation = async () => {
+    if (!identity) return;
     setIsBusy(true);
     try {
-      const result = await revokeConsent({ threadId: session.threadId, consentId });
-      appendMessage(`Consent revoked. Purge job ${result.purge_job.job_id} is ${result.purge_job.status}.`);
       await clearSidepanelSession();
-      resetThreadState();
-      if (identity) {
-        await bootstrapThread(identity.user_id);
-      }
+      setMessages([makeWelcomeMessage()]);
+      await bootstrapThread(identity.user_id, consentCatalog);
+      setSettingsOpen(false);
     } catch (error: unknown) {
-      appendMessage(`Consent revocation failed: ${error instanceof Error ? error.message : "unknown error"}`);
+      appendErrorMessage(`Could not start a new conversation: ${error instanceof Error ? error.message : "unknown error"}`);
     } finally {
       setIsBusy(false);
     }
   };
 
-  const handleRefreshRegimePreview = async () => {
+  const handleSend = async (text: string) => {
     if (!session) {
+      appendErrorMessage("Sign in before sending a message.");
       return;
     }
-    if (!ensureConsentPurposes(["regime_compare"], "Regime comparison")) {
-      return;
-    }
-    setIsBusy(true);
+    const userMessage: ChatMessage = {
+      id: newId("user"),
+      role: "user",
+      content: text,
+      createdAt: new Date().toISOString(),
+      status: "sending",
+    };
+    appendMessages([userMessage]);
+    setIsTyping(true);
     try {
-      const preview = await fetchRegimePreview(session.threadId);
-      setRegimePreview(preview);
-      appendMessage(`Regime comparison refreshed. Recommended regime: ${preview.recommended_regime}.`);
+      const result = await sendChatMessage({
+        threadId: session.threadId,
+        message: text,
+        context: {
+          page: pageContext?.page ?? "unknown",
+          portal_state: pageContext?.portalState ?? null,
+          pilot_mode: PILOT_MODE,
+        },
+      });
+      setMessages((previous) =>
+        previous.map((message) => (message.id === userMessage.id ? { ...message, status: "delivered" } : message))
+      );
+      appendMessages([mapServerMessage(result.agent_message)]);
+      await refreshBackendState(session.threadId);
     } catch (error: unknown) {
-      appendMessage(`Regime comparison failed: ${error instanceof Error ? error.message : "unknown error"}`);
+      setMessages((previous) =>
+        previous.map((message) => (message.id === userMessage.id ? { ...message, status: "error" } : message))
+      );
+      appendErrorMessage(error instanceof Error ? error.message : "The agent could not answer.");
     } finally {
-      setIsBusy(false);
+      setIsTyping(false);
     }
   };
 
-  const handlePrepareRecommendedRegime = async () => {
-    if (!session || !regimePreview) {
+  const handleFilesSelected = async (files: File[]) => {
+    if (!session) {
+      appendErrorMessage("Sign in before uploading documents.");
       return;
     }
-    if (!ensureConsentPurposes(["regime_compare", "fill_portal"], "Recommended regime switch preparation")) {
-      return;
+    for (const file of files) {
+      appendAgentMessage(`Uploading **${file.name}** and sending it through parsing and indexing.`);
+      setIsBusy(true);
+      try {
+        const uploaded = await uploadDocumentFile({ threadId: session.threadId, file });
+        const status = String(uploaded.status ?? "queued");
+        appendAgentMessage("", [
+          {
+            id: `uploaded-${String(uploaded.document_id ?? file.name)}`,
+            kind: "document",
+            title: file.name,
+            body: "Document received. The parser extracts facts first, then the embedding stage indexes searchable chunks.",
+            meta: [
+              { label: "Status", value: status },
+              { label: "Type", value: String(uploaded.document_type ?? "unknown") },
+            ],
+            actions: [{ id: "search-documents", label: "Search documents", variant: "secondary" }],
+          },
+        ]);
+        await refreshBackendState(session.threadId);
+      } catch (error: unknown) {
+        appendErrorMessage(`Upload failed for ${file.name}: ${error instanceof Error ? error.message : "unknown error"}`);
+      } finally {
+        setIsBusy(false);
+      }
     }
-    if (supportAssessment && !supportAssessment.can_autofill) {
-      appendMessage(`Regime switch preparation is paused: ${supportAssessment.reasons[0]?.title ?? "manual review is required"}.`);
+  };
+
+  const handlePreparePage = async () => {
+    if (!session) return;
+    if (!trustStatus?.canOperate) {
+      appendErrorMessage(trustStatus?.message ?? "Open the official portal before preparing a fill plan.");
       return;
     }
     setIsBusy(true);
@@ -1209,274 +573,167 @@ export default function App(): JSX.Element {
       const snapshot = (await refreshSnapshot()) ?? pageContext;
       const proposal = await createProposal({
         threadId: session.threadId,
-        pageType: "regime-choice",
-        fieldId: "regime",
-        targetValue: regimePreview.recommended_regime,
+        pageType: snapshot?.page ?? pageContext?.page ?? "unknown",
         portalState: snapshot?.portalState ?? pageContext?.portalState ?? null,
       });
       setFillPlan(proposal.fill_plan);
-      appendMessage(`Prepared regime switch to ${regimePreview.recommended_regime}. Review the approval card before execution.`);
+      appendAgentMessage(`Prepared ${proposal.fill_plan?.total_actions ?? 0} portal action(s). Review approval cards before execution.`);
       await refreshBackendState(session.threadId);
     } catch (error: unknown) {
-      appendMessage(`Failed to prepare regime switch: ${error instanceof Error ? error.message : "unknown error"}`);
+      appendErrorMessage(`Fill-plan preparation failed: ${error instanceof Error ? error.message : "unknown error"}`);
     } finally {
       setIsBusy(false);
     }
   };
 
-  const handlePrepareReviewHandoff = async () => {
-    if (!session) {
-      return;
-    }
-    if (!ensureConsentPurposes(["share_with_reviewer", "share_review_summary", "share_supporting_documents"], "Reviewer or CA handoff preparation")) {
-      return;
-    }
+  const handleApproval = async (approvalId: string, approved: boolean) => {
+    if (!session) return;
     setIsBusy(true);
     try {
-      const handoff = await prepareReviewHandoff({ threadId: session.threadId });
-      appendMessage(`Prepared CA handoff package ${handoff.handoff_id.slice(0, 8)} for ${handoff.support_mode}.`);
-      await refreshBackendState(session.threadId);
-    } catch (error: unknown) {
-      appendMessage(`CA handoff preparation failed: ${error instanceof Error ? error.message : "unknown error"}`);
-    } finally {
-      setIsBusy(false);
-    }
-  };
-
-  const handleRequestReviewerSignoff = async (approvalId: string) => {
-    if (!session) {
-      return;
-    }
-    if (!ensureConsentPurposes(["share_with_reviewer", "share_review_summary"], "Reviewer sign-off request")) {
-      return;
-    }
-    if (!reviewerEmail.trim()) {
-      appendMessage("Enter a reviewer email before requesting sign-off.");
-      return;
-    }
-    setIsBusy(true);
-    try {
-      const signoff = await requestReviewerSignoff({
+      await decideApproval({
         threadId: session.threadId,
         approvalId,
-        reviewerEmail: reviewerEmail.trim(),
+        approved,
+        rejectionReason: approved ? undefined : "Rejected from chat sidepanel",
       });
-      appendMessage(`Requested reviewer sign-off from ${signoff.reviewer_email}.`);
+      appendAgentMessage(`${approved ? "Approved" : "Rejected"} that request.`);
       await refreshBackendState(session.threadId);
     } catch (error: unknown) {
-      appendMessage(`Reviewer sign-off request failed: ${error instanceof Error ? error.message : "unknown error"}`);
+      appendErrorMessage(`Approval update failed: ${error instanceof Error ? error.message : "unknown error"}`);
     } finally {
       setIsBusy(false);
     }
   };
 
-  const handleCounterConsentReviewer = async (signoffId: string) => {
-    if (!session) {
-      return;
-    }
+  const handleCompareRegimes = async () => {
+    if (!session) return;
     setIsBusy(true);
     try {
-      await counterConsentReviewerSignoff({ signoffId, approved: true });
-      appendMessage("Reviewer sign-off counter-consent recorded.");
-      await refreshBackendState(session.threadId);
+      const preview = await fetchRegimePreview(session.threadId);
+      setRegimePreview(preview);
+      appendAgentMessage(`Recommended regime: **${preview.recommended_regime}**.`);
     } catch (error: unknown) {
-      appendMessage(`Counter-consent failed: ${error instanceof Error ? error.message : "unknown error"}`);
+      appendErrorMessage(`Regime comparison needs extracted tax facts first: ${error instanceof Error ? error.message : "unknown error"}`);
     } finally {
       setIsBusy(false);
     }
   };
 
-  const handleOpenReviewHandoff = async (handoffId: string) => {
-    if (!session) {
-      return;
-    }
-    try {
-      const latestAuth = await loadAuthSession();
-      if (!latestAuth) {
-        throw new Error("Authentication required");
-      }
-      window.open(reviewHandoffPackageUrl(session.threadId, handoffId, latestAuth), "_blank", "noopener,noreferrer");
-    } catch (error: unknown) {
-      appendMessage(`CA handoff download failed: ${error instanceof Error ? error.message : "unknown error"}`);
-    }
-  };
-
-  const handleResumeQuarantine = async () => {
-    if (!session) {
-      return;
-    }
+  const handleSearchDocuments = async (query = "What tax filing information is available in my uploaded documents?") => {
+    if (!session) return;
     setIsBusy(true);
     try {
-      await resumeThreadQuarantine({ threadId: session.threadId, note: "user_reviewed_anomaly" });
-      appendMessage("Automation quarantine cleared after review.");
-      await refreshBackendState(session.threadId);
+      const result = await searchDocuments({ threadId: session.threadId, query, topK: 5 });
+      if (result.results.length === 0) {
+        appendAgentMessage("I did not find indexed document matches yet. Upload Form 16, AIS, TIS, or proofs and I will index them.");
+      } else {
+        appendAgentMessage(`Found ${result.results.length} document match(es) using ${result.mode}.`, [
+          {
+            id: `search-${Date.now()}`,
+            kind: "evidence",
+            title: result.results[0].file_name,
+            body: result.results[0].chunk_text,
+            meta: [
+              { label: "Score", value: result.results[0].score.toFixed(3) },
+              { label: "Type", value: result.results[0].document_type },
+            ],
+          },
+        ]);
+      }
     } catch (error: unknown) {
-      appendMessage(`Failed to resume automation: ${error instanceof Error ? error.message : "unknown error"}`);
+      appendErrorMessage(`Document search failed: ${error instanceof Error ? error.message : "unknown error"}`);
     } finally {
       setIsBusy(false);
     }
   };
 
-  const sendMessage = (text: string) => {
-    setMessages((prev) => [...prev, `You: ${text}`]);
-    chrome.runtime.sendMessage({
-      type: "chat_message",
-      payload: {
-        text,
-        page
-      }
-    });
+  const handleAction = (actionId: string) => {
+    if (actionId === "start-filing") {
+      void handleSend("File my income tax return for the current year.");
+      return;
+    }
+    if (actionId === "upload-documents") {
+      appendAgentMessage("Use the + button or drag files into the chat. I will parse and index the uploaded PDFs, CSVs, JSON, and images.");
+      return;
+    }
+    if (actionId === "refund-status") {
+      void handleSend("Check my refund status.");
+      return;
+    }
+    if (actionId === "compare-regimes") {
+      void handleCompareRegimes();
+      return;
+    }
+    if (actionId === "prepare-fill") {
+      void handlePreparePage();
+      return;
+    }
+    if (actionId === "search-documents" || actionId.startsWith("search-document:")) {
+      void handleSearchDocuments();
+      return;
+    }
+    if (actionId.startsWith("approve:")) {
+      void handleApproval(actionId.slice("approve:".length), true);
+      return;
+    }
+    if (actionId.startsWith("reject:")) {
+      void handleApproval(actionId.slice("reject:".length), false);
+    }
   };
-
-  const submitApprovalApproved = approvals.some(
-    (approval) => approval.status === "approved" && ["submit_final", "submit_draft"].includes(approval.kind)
-  );
-  const everifyApprovalApproved = approvals.some(
-    (approval) => approval.status === "approved" && approval.kind === "everify"
-  );
 
   if (!authSession) {
     return (
-      <main>
-        <h2>IncomeTax Agent</h2>
-        {trustStatus ? <p>Portal trust: {trustStatus.message}</p> : null}
-        <p>Sign in with the credentials you created in the CA dashboard to start a protected filing session.</p>
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            void handleLogin();
-          }}
-          style={{ display: "grid", gap: 10, maxWidth: 360 }}
-        >
-          <label style={{ display: "grid", gap: 4 }}>
-            <span>Email</span>
-            <input
-              value={authEmail}
-              onChange={(event) => setAuthEmail(event.target.value)}
-              placeholder="you@firm.com"
-              type="email"
-              autoComplete="email"
-              required
-            />
-          </label>
-          <label style={{ display: "grid", gap: 4 }}>
-            <span>Password</span>
-            <input
-              value={authPassword}
-              onChange={(event) => setAuthPassword(event.target.value)}
-              placeholder="Password"
-              type="password"
-              autoComplete="current-password"
-              minLength={8}
-              required
-            />
-          </label>
-          {authError ? <p style={{ color: "#a32c2c", margin: 0 }}>{authError}</p> : null}
-          <button type="submit" disabled={isBusy}>
-            Sign in on this device
-          </button>
-          <p style={{ fontSize: 12, color: "#5a676d", margin: 0 }}>
-            Don't have an account yet? Create one from the CA dashboard, then return here to sign in.
-          </p>
-        </form>
-      </main>
+      <WelcomeScreen
+        authError={authError}
+        authEmail={authEmail}
+        authPassword={authPassword}
+        isBusy={isBusy}
+        trustMessage={trustStatus?.message}
+        onEmailChange={setAuthEmail}
+        onPasswordChange={setAuthPassword}
+        onLogin={() => void handleLogin()}
+      />
     );
   }
 
   return (
-    <main>
-      <h2>IncomeTax Agent</h2>
-      <p>Signed in as {identity?.email ?? authSession.email}</p>
-      <button disabled={isBusy} onClick={() => void handleLogout()}>
-        Sign out
-      </button>
-      {trustStatus ? <p>Portal trust: {trustStatus.message}</p> : null}
-      {session ? <p>Thread: {session.threadId.slice(0, 8)}</p> : null}
-      {session && consentCatalog.length > 0 ? (
-        <ConsentOnboardingPane
-          items={consentCatalog}
-          activePurposes={activeConsentPurposes}
-          selectedPurposes={new Set(selectedConsentPurposes)}
-          isBusy={isBusy}
-          onTogglePurpose={handleToggleConsentPurpose}
-          onGrantSelected={() => void handleGrantSelectedConsents()}
-        />
-      ) : null}
-      <DetectedDetailsPane
-        page={page}
-        fields={detectedFields}
-        validationErrors={validationErrors}
-        validationHelp={validationHelp}
-        regimePreview={regimePreview}
+    <main className="sidepanel-shell">
+      <header className="sidepanel-header">
+        <div className="brand-lockup">
+          <span className="app-mark">IT</span>
+          <div>
+            <h1>IncomeTax Agent</h1>
+            <p>{identity?.email ?? authSession.email}</p>
+          </div>
+        </div>
+        <div className="header-actions">
+          <span className={`status-dot ${trustStatus?.status ?? "missing"}`} title={trustStatus?.message ?? "Portal trust unknown"} />
+          <button className="icon-button" type="button" aria-label="Settings" onClick={() => setSettingsOpen(true)}>
+            ...
+          </button>
+        </div>
+      </header>
+      <ChatPane
+        messages={messages}
+        contextualCards={contextualCards}
+        documents={documents}
         isBusy={isBusy}
-        onRefreshRegimePreview={() => void handleRefreshRegimePreview()}
-        onPrepareRecommendedRegime={() => void handlePrepareRecommendedRegime()}
+        isTyping={isTyping}
+        onSend={handleSend}
+        onFilesSelected={handleFilesSelected}
+        onAction={handleAction}
       />
-      <SupportPane
-        supportAssessment={supportAssessment}
+      <SettingsDrawer
+        open={settingsOpen}
+        email={identity?.email ?? authSession.email}
+        threadId={session?.threadId}
+        trustMessage={trustStatus?.message}
+        documentCount={documents.length}
         isBusy={isBusy}
-        onPrepareHandoff={() => void handlePrepareReviewHandoff()}
-        onOpenHandoff={(handoffId) => void handleOpenReviewHandoff(handoffId)}
-        onResumeQuarantine={() => void handleResumeQuarantine()}
+        onClose={() => setSettingsOpen(false)}
+        onNewConversation={() => void handleNewConversation()}
+        onSignOut={() => void handleLogout()}
       />
-      <ChatPane onSend={sendMessage} messages={messages} />
-      <PendingActionsPane
-        page={page}
-        fillPlan={fillPlan}
-        approvals={approvals}
-        approvedActionCount={approvedActions.length}
-        lastExecution={executions[0] ?? null}
-        isBusy={isBusy}
-        reviewerEmail={reviewerEmail}
-        onReviewerEmailChange={setReviewerEmail}
-        onPreparePage={handlePreparePage}
-        onApprove={(approvalId) => void handleApproval(approvalId, true)}
-        onReject={(approvalId) => void handleApproval(approvalId, false)}
-        onRequestReviewerSignoff={(approvalId) => void handleRequestReviewerSignoff(approvalId)}
-        onCounterConsentReviewerSignoff={(signoffId) => void handleCounterConsentReviewer(signoffId)}
-        onExecute={() => void handleExecute()}
-        onUndo={() => void handleUndo()}
-      />
-      <SubmissionPane
-        submissionStatus={submissionStatus}
-        submissionSummary={submissionSummary}
-        artifacts={filingArtifacts}
-        everification={everification}
-        archived={isArchived}
-        isBusy={isBusy}
-        submitApprovalApproved={submitApprovalApproved}
-        everifyApprovalApproved={everifyApprovalApproved}
-        nextRevisionNumber={nextRevisionNumber}
-        consents={consents}
-        purgeJobs={purgeJobs}
-        onGenerateSummary={() => void handleGenerateSummary()}
-        onPrepareSubmit={() => void handlePrepareSubmit()}
-        onCompleteSubmission={(ackNo, portalRef) => void handleCompleteSubmission(ackNo, portalRef)}
-        onPrepareEVerify={(method) => void handlePrepareEVerify(method)}
-        onStartEVerify={(method) => void handleStartEVerify(method)}
-        onCompleteEVerify={(portalRef) => void handleCompleteEVerify(portalRef)}
-        onAttachOfficialArtifact={(manualText, ackNo, portalRef, filedAt) =>
-          void handleAttachOfficialArtifact(manualText, ackNo, portalRef, filedAt)}
-        onCaptureOfficialArtifactPage={(ackNo, portalRef, filedAt) =>
-          void handleCaptureOfficialArtifactPage(ackNo, portalRef, filedAt)}
-        onCreateRevision={(reason) => void handleCreateRevision(reason)}
-        onRevokeConsent={(consentId) => void handleRevokeConsent(consentId)}
-        onOpenArtifact={(artifactName) => void handleOpenArtifact(artifactName)}
-      />
-      <PostFilingPane
-        currentPage={page}
-        yearOverYear={yearOverYear}
-        nextAyChecklist={nextAyChecklist}
-        notices={noticePreparations}
-        refundStatus={refundStatus}
-        isBusy={isBusy}
-        onGenerateYearOverYear={() => void handleGenerateYearOverYear()}
-        onGenerateNextAyChecklist={() => void handleGenerateNextAyChecklist()}
-        onPrepareNotice={(noticeText) => void handlePrepareNotice(noticeText)}
-        onCaptureRefundStatusPage={() => void handleCaptureRefundStatusPage()}
-        onSaveManualRefundStatus={(input) => void handleSaveManualRefundStatus(input)}
-      />
-      <EvidencePane facts={facts} />
     </main>
   );
 }

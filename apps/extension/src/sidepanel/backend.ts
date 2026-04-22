@@ -398,6 +398,72 @@ export type SupportAssessment = {
   security_status?: SecurityStatus;
 };
 
+export type ChatApiMessage = {
+  id: string;
+  thread_id: string;
+  role: "user" | "agent" | "system" | "error";
+  content: string;
+  message_type: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+};
+
+export type ChatMessageResponse = {
+  thread_id: string;
+  user_message: ChatApiMessage;
+  agent_message: ChatApiMessage;
+};
+
+export type ChatHistoryResponse = {
+  thread_id: string;
+  messages: ChatApiMessage[];
+};
+
+export type ThreadDocument = {
+  document_id: string;
+  thread_id?: string | null;
+  file_name: string;
+  mime_type: string;
+  document_type: string;
+  status: string;
+  storage_uri?: string;
+  classification_confidence?: number;
+  latest_version_no?: number;
+  uploaded_at?: string | null;
+  parsed_at?: string | null;
+  normalized_fields?: Record<string, unknown>;
+  versions?: Array<Record<string, unknown>>;
+};
+
+export type DocumentUploadInit = {
+  document_id: string;
+  thread_id?: string | null;
+  status: string;
+  storage_uri: string;
+  version_no: number;
+  upload_url: string;
+  direct_upload_url?: string | null;
+  expires: number;
+  signature: string;
+};
+
+export type DocumentSearchResult = {
+  document_id: string;
+  file_name: string;
+  document_type: string;
+  chunk_text: string;
+  score: number;
+  page_number?: number | null;
+  section_name?: string | null;
+};
+
+export type DocumentSearchResponse = {
+  thread_id: string;
+  query: string;
+  mode: string;
+  results: DocumentSearchResult[];
+};
+
 type RequestInitWithJson = RequestInit & {
   body?: string;
 };
@@ -501,6 +567,24 @@ async function request<T>(path: string, init?: RequestInitWithJson): Promise<T> 
     await throwBackendError(response);
   }
 
+  return response.json() as Promise<T>;
+}
+
+async function requestUrl<T>(urlOrPath: string, init?: RequestInitWithJson): Promise<T> {
+  const auth = await ensureFreshAuthSession();
+  const url = urlOrPath.startsWith("http") ? urlOrPath : `${BACKEND_BASE_URL}${urlOrPath}`;
+  const response = await fetch(url, {
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${auth.accessToken}`,
+      "X-ITX-Device-ID": auth.deviceId,
+      ...(init?.headers ?? {}),
+    },
+    ...init,
+  });
+  if (!response.ok) {
+    await throwBackendError(response);
+  }
   return response.json() as Promise<T>;
 }
 
@@ -958,6 +1042,120 @@ export async function fetchRegimePreview(threadId: string): Promise<RegimePrevie
 
 export async function fetchSupportAssessment(threadId: string): Promise<SupportAssessment> {
   return request(`/api/ca/client/${threadId}/support`);
+}
+
+export async function fetchChatMessages(threadId: string, limit = 50): Promise<ChatHistoryResponse> {
+  return request<ChatHistoryResponse>(`/api/chat/${threadId}/messages?limit=${limit}`);
+}
+
+export async function sendChatMessage(input: {
+  threadId: string;
+  message: string;
+  context?: Record<string, unknown>;
+}): Promise<ChatMessageResponse> {
+  return request<ChatMessageResponse>("/api/chat/message", {
+    method: "POST",
+    body: JSON.stringify({
+      thread_id: input.threadId,
+      message: input.message,
+      context: input.context ?? {},
+    }),
+  });
+}
+
+export async function fetchThreadDocuments(threadId: string): Promise<{ thread_id: string; documents: ThreadDocument[] }> {
+  return request(`/api/documents/thread/${threadId}`);
+}
+
+export async function createDocumentUpload(input: {
+  threadId: string;
+  fileName: string;
+  mimeType: string;
+  docType?: string;
+  documentId?: string;
+  reason?: string;
+}): Promise<DocumentUploadInit> {
+  return request<DocumentUploadInit>("/api/documents/signed-upload", {
+    method: "POST",
+    body: JSON.stringify({
+      thread_id: input.threadId,
+      file_name: input.fileName,
+      mime_type: input.mimeType,
+      doc_type: input.docType ?? "unknown",
+      document_id: input.documentId ?? null,
+      reason: input.reason ?? null,
+    }),
+  });
+}
+
+function readFileAsBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Could not read file"));
+    reader.onload = () => {
+      const value = String(reader.result ?? "");
+      resolve(value.includes(",") ? value.split(",")[1] : value);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+export function inferDocumentType(fileName: string): string {
+  const normalized = fileName.toLowerCase();
+  if (normalized.includes("form16a")) return "form16a";
+  if (normalized.includes("form16") || normalized.includes("form-16")) return "form16";
+  if (normalized.includes("ais")) return normalized.endsWith(".json") ? "ais_json" : "ais_csv";
+  if (normalized.includes("tis")) return "tis";
+  if (normalized.includes("bank")) return "bank_statement";
+  if (normalized.includes("rent")) return "rent_receipt";
+  if (normalized.includes("home") || normalized.includes("loan")) return "home_loan_cert";
+  if (normalized.includes("insurance")) return "health_insurance";
+  return "unknown";
+}
+
+export async function uploadDocumentFile(input: {
+  threadId: string;
+  file: File;
+  docType?: string;
+  processImmediately?: boolean;
+}): Promise<Record<string, unknown>> {
+  const created = await createDocumentUpload({
+    threadId: input.threadId,
+    fileName: input.file.name,
+    mimeType: input.file.type || "application/octet-stream",
+    docType: input.docType ?? inferDocumentType(input.file.name),
+  });
+  const contentBase64 = await readFileAsBase64(input.file);
+  return requestUrl<Record<string, unknown>>(created.upload_url, {
+    method: "PUT",
+    body: JSON.stringify({
+      thread_id: input.threadId,
+      doc_type: input.docType ?? inferDocumentType(input.file.name),
+      process_immediately: input.processImmediately ?? true,
+      content_base64: contentBase64,
+    }),
+  });
+}
+
+export async function searchDocuments(input: {
+  threadId: string;
+  query: string;
+  topK?: number;
+  docTypes?: string[];
+}): Promise<DocumentSearchResponse> {
+  return request<DocumentSearchResponse>("/api/documents/search", {
+    method: "POST",
+    body: JSON.stringify({
+      thread_id: input.threadId,
+      query: input.query,
+      top_k: input.topK ?? 5,
+      doc_types: input.docTypes ?? null,
+    }),
+  });
+}
+
+export async function fetchEmbeddingHealth(): Promise<Record<string, unknown>> {
+  return request<Record<string, unknown>>("/api/documents/embedding-health");
 }
 
 export async function prepareReviewHandoff(input: {

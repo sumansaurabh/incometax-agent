@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import base64
 import binascii
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -40,6 +40,13 @@ class QueueRunRequest(BaseModel):
     limit: int = 10
 
 
+class DocumentSearchRequest(BaseModel):
+    thread_id: str
+    query: str
+    top_k: int = 5
+    doc_types: Optional[list[str]] = None
+
+
 async def _require_document_access(document_id: str) -> str:
     thread_id = await document_service.get_document_thread_id(document_id)
     if thread_id is None:
@@ -49,7 +56,7 @@ async def _require_document_access(document_id: str) -> str:
 
 
 @router.post("/signed-upload")
-async def signed_upload(payload: UploadInitRequest) -> dict[str, Optional[str]]:
+async def signed_upload(payload: UploadInitRequest) -> dict[str, Any]:
     if payload.document_id:
         existing_thread_id = await _require_document_access(payload.document_id)
         if payload.thread_id and payload.thread_id != existing_thread_id:
@@ -145,3 +152,23 @@ async def list_thread_documents(thread_id: str) -> dict[str, object]:
         "thread_id": thread_id,
         "documents": await document_service.list_documents(thread_id),
     }
+
+
+@router.post("/search")
+async def search_thread_documents(payload: DocumentSearchRequest) -> dict[str, object]:
+    await require_thread_state(payload.thread_id)
+    try:
+        return await document_service.semantic_search(
+            thread_id=payload.thread_id,
+            query=payload.query,
+            top_k=payload.top_k,
+            doc_types=payload.doc_types,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/embedding-health")
+async def embedding_health() -> dict[str, object]:
+    get_request_auth(required=True)
+    return await document_service.embedding_health()

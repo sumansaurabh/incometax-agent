@@ -98,6 +98,58 @@ body {
   gap: 16px;
 }
 
+.document-workspace {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.document-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.document-form label {
+  display: grid;
+  gap: 6px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.document-results {
+  min-height: 72px;
+}
+
+.table.compact th,
+.table.compact td {
+  padding: 9px 8px;
+}
+
+.search-results {
+  display: grid;
+  gap: 10px;
+}
+
+.search-result {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.search-result h3,
+.search-result p {
+  margin: 0 0 8px;
+}
+
+.search-result h3 span,
+.search-result small {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
 .table {
   width: 100%;
   border-collapse: collapse;
@@ -238,7 +290,8 @@ button:disabled {
   .hero,
   .workspace,
   .grid.stats,
-  .row {
+  .row,
+  .document-form {
     grid-template-columns: 1fr;
   }
 }

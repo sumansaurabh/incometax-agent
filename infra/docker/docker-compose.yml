@@ -24,6 +24,40 @@ services:
       timeout: 5s
       retries: 5
 
+  qdrant:
+    image: qdrant/qdrant:v1.13.2
+    # ports:
+    #   - '6333:6333'
+    #   - '6334:6334'
+    volumes:
+      - qdrant-data:/qdrant/storage
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'bash -lc ''exec 3<>/dev/tcp/127.0.0.1/6333 && printf "GET /readyz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n" >&3 && grep -q "200 OK" <&3''',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: itxadmin
+      MINIO_ROOT_PASSWORD: itxadmin123
+    # ports:
+    #   - '9000:9000'
+    #   - '9001:9001'
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:9000/minio/health/live']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   backend:
     build:
       context: ../../
@@ -31,7 +65,17 @@ services:
     environment:
       ITX_DATABASE_URL: postgresql://itx:itx@postgres:5432/itx
       ITX_DOCUMENT_STORAGE_ROOT: /tmp/itx-documents
+      ITX_DOCUMENT_STORAGE_BACKEND: ${ITX_DOCUMENT_STORAGE_BACKEND:-minio}
       ITX_REDIS_URL: ${ITX_REDIS_URL:-redis://redis:6379/0}
+      ITX_QDRANT_URL: ${ITX_QDRANT_URL:-http://qdrant:6333}
+      ITX_QDRANT_COLLECTION: ${ITX_QDRANT_COLLECTION:-tax_documents}
+      ITX_MINIO_ENDPOINT: ${ITX_MINIO_ENDPOINT:-minio:9000}
+      ITX_MINIO_ACCESS_KEY: ${ITX_MINIO_ACCESS_KEY:-itxadmin}
+      ITX_MINIO_SECRET_KEY: ${ITX_MINIO_SECRET_KEY:-itxadmin123}
+      ITX_MINIO_BUCKET: ${ITX_MINIO_BUCKET:-itx-documents}
+      ITX_OPENAI_API_KEY: ${ITX_OPENAI_API_KEY:-}
+      ITX_EMBEDDING_MODEL: ${ITX_EMBEDDING_MODEL:-text-embedding-3-small}
+      ITX_EMBEDDING_DIMENSIONS: ${ITX_EMBEDDING_DIMENSIONS:-1536}
       ITX_AI_PROVIDER: ${ITX_AI_PROVIDER:-openai}
       ITX_AI_MODEL: ${ITX_AI_MODEL:-gpt-4.1-mini}
       ITX_AI_API_KEY: ${ITX_AI_API_KEY:-}
@@ -49,6 +93,10 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
     volumes:
       - ../../apps/backend:/app/apps/backend
       - ../../apps/workers:/app/apps/workers
@@ -62,7 +110,17 @@ services:
     environment:
       ITX_DATABASE_URL: postgresql://itx:itx@postgres:5432/itx
       ITX_DOCUMENT_STORAGE_ROOT: /tmp/itx-documents
+      ITX_DOCUMENT_STORAGE_BACKEND: ${ITX_DOCUMENT_STORAGE_BACKEND:-minio}
       ITX_REDIS_URL: ${ITX_REDIS_URL:-redis://redis:6379/0}
+      ITX_QDRANT_URL: ${ITX_QDRANT_URL:-http://qdrant:6333}
+      ITX_QDRANT_COLLECTION: ${ITX_QDRANT_COLLECTION:-tax_documents}
+      ITX_MINIO_ENDPOINT: ${ITX_MINIO_ENDPOINT:-minio:9000}
+      ITX_MINIO_ACCESS_KEY: ${ITX_MINIO_ACCESS_KEY:-itxadmin}
+      ITX_MINIO_SECRET_KEY: ${ITX_MINIO_SECRET_KEY:-itxadmin123}
+      ITX_MINIO_BUCKET: ${ITX_MINIO_BUCKET:-itx-documents}
+      ITX_OPENAI_API_KEY: ${ITX_OPENAI_API_KEY:-}
+      ITX_EMBEDDING_MODEL: ${ITX_EMBEDDING_MODEL:-text-embedding-3-small}
+      ITX_EMBEDDING_DIMENSIONS: ${ITX_EMBEDDING_DIMENSIONS:-1536}
       ITX_AI_PROVIDER: ${ITX_AI_PROVIDER:-openai}
       ITX_AI_MODEL: ${ITX_AI_MODEL:-gpt-4.1-mini}
       ITX_AI_API_KEY: ${ITX_AI_API_KEY:-}
@@ -79,6 +137,10 @@ services:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      minio:
         condition: service_healthy
     volumes:
       - ../../apps/backend:/app/apps/backend
@@ -99,3 +161,7 @@ services:
       - ../../apps/web-dashboard:/app/apps/web-dashboard
     ports:
       - '4173:4173'
+
+volumes:
+  qdrant-data:
+  minio-data:

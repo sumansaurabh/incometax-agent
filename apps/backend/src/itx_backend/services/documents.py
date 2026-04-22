@@ -131,6 +131,7 @@ class DocumentService:
                 f"/api/documents/{document_uuid}/content"
                 f"?version_no={version_no}&expires={signed['expires']}&signature={signed['signature']}"
             ),
+            "direct_upload_url": signed.get("direct_upload_url"),
             "expires": signed["expires"],
             "signature": signed["signature"],
         }
@@ -362,6 +363,137 @@ class DocumentService:
                 document_id,
             )
 
+    async def semantic_search(
+        self,
+        *,
+        thread_id: str,
+        query: str,
+        top_k: int = 5,
+        doc_types: Optional[list[str]] = None,
+    ) -> dict[str, Any]:
+        clean_query = query.strip()
+        if not clean_query:
+            raise ValueError("query_required")
+
+        try:
+            from itx_backend.services.embedding_service import embedding_service
+            from itx_backend.services.qdrant_client import qdrant_store
+
+            vector = await embedding_service.embed_query(clean_query)
+            matches = await qdrant_store.search(
+                vector=vector,
+                thread_id=thread_id,
+                top_k=top_k,
+                doc_types=doc_types,
+            )
+            return {
+                "thread_id": thread_id,
+                "query": clean_query,
+                "mode": "qdrant_openai_embeddings",
+                "results": [
+                    {
+                        "document_id": str(match.payload.get("document_id", "")),
+                        "file_name": str(match.payload.get("file_name", "Document")),
+                        "document_type": str(match.payload.get("doc_type", "unknown")),
+                        "chunk_text": str(match.payload.get("chunk_text", "")),
+                        "score": match.score,
+                        "page_number": match.payload.get("page_number"),
+                        "section_name": match.payload.get("section_name"),
+                    }
+                    for match in matches
+                ],
+            }
+        except Exception:
+            return await self._lexical_search(thread_id=thread_id, query=clean_query, top_k=top_k, doc_types=doc_types)
+
+    async def embedding_health(self) -> dict[str, Any]:
+        from dataclasses import asdict
+
+        from itx_backend.services.embedding_service import embedding_service
+        from itx_backend.services.qdrant_client import qdrant_store
+
+        embedding = asdict(embedding_service.status())
+        try:
+            qdrant = await qdrant_store.stats()
+        except Exception as exc:
+            qdrant = {"healthy": False, "detail": str(exc)}
+
+        storage: dict[str, Any] = {
+            "backend": settings.document_storage_backend,
+            "bucket": settings.minio_bucket if settings.document_storage_backend.lower() == "minio" else None,
+            "healthy": True,
+        }
+        ensure_bucket = getattr(document_storage, "ensure_bucket", None)
+        if callable(ensure_bucket):
+            try:
+                ensure_bucket()
+            except Exception as exc:
+                storage["healthy"] = False
+                storage["detail"] = str(exc)
+
+        return {
+            "embedding": embedding,
+            "qdrant": qdrant,
+            "storage": storage,
+        }
+
+    async def _lexical_search(
+        self,
+        *,
+        thread_id: str,
+        query: str,
+        top_k: int,
+        doc_types: Optional[list[str]],
+    ) -> dict[str, Any]:
+        terms = [term for term in query.lower().split() if len(term) > 2]
+        pool = await get_pool()
+        async with pool.acquire() as connection:
+            rows = await connection.fetch(
+                """
+                select d.id, d.file_name, d.doc_type, dp.page_no, dp.text
+                from documents d
+                join document_pages dp on dp.document_id = d.id
+                where d.thread_id = $1
+                  and ($2::text[] is null or d.doc_type = any($2::text[]))
+                order by d.updated_at desc, dp.page_no asc
+                limit 200
+                """,
+                thread_id,
+                doc_types,
+            )
+
+        scored: list[dict[str, Any]] = []
+        for row in rows:
+            text = str(row["text"] or "")
+            lowered = text.lower()
+            score = sum(1 for term in terms if term in lowered) / max(len(terms), 1)
+            if score <= 0 and terms:
+                continue
+            snippet = text[:900]
+            first_match = next((lowered.find(term) for term in terms if term in lowered), -1)
+            if first_match > 120:
+                start = max(0, first_match - 120)
+                snippet = text[start : start + 900]
+            scored.append(
+                {
+                    "document_id": str(row["id"]),
+                    "file_name": row["file_name"],
+                    "document_type": row["doc_type"],
+                    "chunk_text": snippet,
+                    "score": score or 0.01,
+                    "page_number": row["page_no"],
+                    "section_name": "lexical_fallback",
+                }
+            )
+
+        scored.sort(key=lambda item: item["score"], reverse=True)
+        return {
+            "thread_id": thread_id,
+            "query": query,
+            "mode": "lexical_fallback",
+            "results": scored[: max(1, min(top_k, 20))],
+        }
+
     async def _attach_to_thread(self, thread_id: str, processed_document: dict[str, Any]) -> Optional[dict[str, Any]]:
         state = await checkpointer.latest(thread_id)
         if state is None:
@@ -585,6 +717,28 @@ class DocumentService:
                         float(entity.get("confidence", 0) or 0),
                     )
 
+        embedding_index = {"status": "skipped", "reason": "embedding_stage_not_started", "chunk_count": 0}
+        try:
+            from itx_workers.pipelines.index_embeddings import index_document_embeddings
+
+            embedding_index = await index_document_embeddings(processed)
+            if embedding_index.get("status") == "indexed":
+                async with pool.acquire() as connection:
+                    await connection.execute(
+                        """
+                        update documents
+                        set status = 'indexed', updated_at = now()
+                        where id = $1
+                        """,
+                        parsed_document_id,
+                    )
+        except Exception as exc:  # Keep parsing useful even if embeddings are temporarily unavailable.
+            embedding_index = {
+                "status": "failed",
+                "reason": str(exc),
+                "chunk_count": 0,
+            }
+
         processed_document = {
             "id": str(row["id"]),
             "name": row["file_name"],
@@ -620,6 +774,7 @@ class DocumentService:
             "warnings": processed_document["extraction_warnings"],
             "security": security,
             "version_no": version_no,
+            "embedding_index": embedding_index,
             "attached_thread": attached_summary,
         }
 

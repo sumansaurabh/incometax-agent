@@ -66,7 +66,15 @@ class LocalDocumentStorage:
             current = current.parent
 
 
-document_storage = LocalDocumentStorage(
-    root=settings.document_storage_root,
-    secret=settings.document_upload_secret,
-)
+def build_document_storage() -> LocalDocumentStorage:
+    if settings.document_storage_backend.lower() == "minio":
+        from itx_backend.services.minio_storage import build_minio_document_storage
+
+        return build_minio_document_storage()  # type: ignore[return-value]
+    return LocalDocumentStorage(
+        root=settings.document_storage_root,
+        secret=settings.document_upload_secret,
+    )
+
+
+document_storage = build_document_storage()

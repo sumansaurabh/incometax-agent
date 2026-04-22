@@ -11,6 +11,7 @@ from itx_backend.api import (
     autopilot,
     auth,
     ca_workspace,
+    chat,
     documents,
     drift,
     exports,
@@ -27,6 +28,7 @@ from itx_backend.security.anomaly import anomaly_detector
 from itx_backend.security.request_auth import reset_request_auth, set_request_auth
 from itx_backend.security.rate_limit import FixedWindowRateLimiter
 from itx_backend.services.auth_runtime import AuthError, auth_runtime
+from itx_backend.services.document_storage import document_storage
 from itx_backend.services.retention import retention_service
 from itx_backend.services.runtime_cache import runtime_cache
 from itx_backend.services.startup_health import startup_health_service
@@ -39,6 +41,9 @@ limiter = FixedWindowRateLimiter(limit=500, window_seconds=settings.rate_limit_w
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     await init_connection_pool()
+    ensure_bucket = getattr(document_storage, "ensure_bucket", None)
+    if callable(ensure_bucket):
+        ensure_bucket()
     await startup_health_service.validate_startup()
     try:
         yield
@@ -109,6 +114,7 @@ def create_app() -> FastAPI:
 
     app.include_router(auth.router)
     app.include_router(threads.router)
+    app.include_router(chat.router)
     app.include_router(documents.router)
     app.include_router(actions.router)
     app.include_router(analytics.router)
