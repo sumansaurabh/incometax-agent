@@ -463,14 +463,42 @@ async function maybeAutoQuarantine(path: string, init: RequestInitWithJson | und
   }).catch(() => undefined);
 }
 
+export class BackendError extends Error {
+  readonly status: number;
+  readonly code: string | null;
+
+  constructor(message: string, status: number, code: string | null) {
+    super(message);
+    this.name = "BackendError";
+    this.status = status;
+    this.code = code;
+  }
+
+  isAuthFailure(): boolean {
+    return this.status === 401 || this.status === 403;
+  }
+}
+
+function translateAuthCode(code: string | null | undefined): string | null {
+  if (!code) return null;
+  return AUTH_ERROR_MESSAGES[code] ?? null;
+}
+
+async function throwBackendError(response: Response): Promise<never> {
+  const errorPayload = (await response.json().catch(() => null)) as { detail?: string; error?: string } | null;
+  const code = errorPayload?.detail ?? errorPayload?.error ?? null;
+  const friendly = translateAuthCode(code);
+  const message = friendly ?? code ?? `Backend request failed: ${response.status}`;
+  throw new BackendError(message, response.status, code);
+}
+
 async function request<T>(path: string, init?: RequestInitWithJson): Promise<T> {
   const auth = await ensureFreshAuthSession();
   const response = await authenticatedFetch(path, auth, init);
   await maybeAutoQuarantine(path, init, auth, response);
 
   if (!response.ok) {
-    const errorPayload = (await response.json().catch(() => null)) as { detail?: string; error?: string } | null;
-    throw new Error(errorPayload?.detail ?? errorPayload?.error ?? `Backend request failed: ${response.status}`);
+    await throwBackendError(response);
   }
 
   return response.json() as Promise<T>;
@@ -485,8 +513,7 @@ async function unauthenticatedRequest<T>(path: string, init?: RequestInitWithJso
     ...init,
   });
   if (!response.ok) {
-    const errorPayload = (await response.json().catch(() => null)) as { detail?: string; error?: string } | null;
-    throw new Error(errorPayload?.detail ?? errorPayload?.error ?? `Backend request failed: ${response.status}`);
+    await throwBackendError(response);
   }
   return response.json() as Promise<T>;
 }
@@ -514,44 +541,34 @@ export async function loginToBackend(input: {
   deviceId: string;
   deviceName: string;
 }): Promise<AuthSession> {
-  try {
-    const payload = await unauthenticatedRequest<{
-      user_id: string;
-      email: string;
-      device_id: string;
-      session_id: string;
-      access_token: string;
-      refresh_token: string;
-      access_expires_at: string;
-      refresh_expires_at: string;
-    }>("/api/auth/login", {
-      method: "POST",
-      body: JSON.stringify({
-        email: input.email,
-        password: input.password,
-        device_id: input.deviceId,
-        device_name: input.deviceName,
-      }),
-    });
-    return {
-      userId: payload.user_id,
-      email: payload.email,
-      deviceId: payload.device_id,
-      sessionId: payload.session_id,
-      accessToken: payload.access_token,
-      refreshToken: payload.refresh_token,
-      accessExpiresAt: payload.access_expires_at,
-      refreshExpiresAt: payload.refresh_expires_at,
-    };
-  } catch (error) {
-    if (error instanceof Error) {
-      const friendly = AUTH_ERROR_MESSAGES[error.message];
-      if (friendly) {
-        throw new Error(friendly);
-      }
-    }
-    throw error;
-  }
+  const payload = await unauthenticatedRequest<{
+    user_id: string;
+    email: string;
+    device_id: string;
+    session_id: string;
+    access_token: string;
+    refresh_token: string;
+    access_expires_at: string;
+    refresh_expires_at: string;
+  }>("/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify({
+      email: input.email,
+      password: input.password,
+      device_id: input.deviceId,
+      device_name: input.deviceName,
+    }),
+  });
+  return {
+    userId: payload.user_id,
+    email: payload.email,
+    deviceId: payload.device_id,
+    sessionId: payload.session_id,
+    accessToken: payload.access_token,
+    refreshToken: payload.refresh_token,
+    accessExpiresAt: payload.access_expires_at,
+    refreshExpiresAt: payload.refresh_expires_at,
+  };
 }
 
 export async function fetchCurrentIdentity(): Promise<AuthIdentity> {

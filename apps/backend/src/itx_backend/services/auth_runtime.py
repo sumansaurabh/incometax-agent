@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+import asyncpg
+
 from itx_backend.config import settings
 from itx_backend.db.session import get_pool
 
@@ -16,6 +18,16 @@ from itx_backend.db.session import get_pool
 PASSWORD_ITERATIONS = 600_000
 PASSWORD_ALGO = "pbkdf2_sha256"
 PASSWORD_SALT_BYTES = 16
+
+# Precomputed hash used when login email is unknown, so we still burn ~200ms
+# of PBKDF2 and avoid a timing oracle for email enumeration. The hash itself
+# never matches any real password (random material).
+_DUMMY_PASSWORD_HASH = (
+    "$pbkdf2_sha256$600000$"
+    + base64.b64encode(secrets.token_bytes(PASSWORD_SALT_BYTES)).decode("ascii")
+    + "$"
+    + base64.b64encode(secrets.token_bytes(32)).decode("ascii")
+)
 
 
 class AuthError(Exception):
@@ -226,46 +238,50 @@ class AuthRuntimeService:
         user_id = uuid.uuid4()
 
         pool = await get_pool()
-        async with pool.acquire() as connection:
-            async with connection.transaction():
-                existing = await connection.fetchrow(
-                    "select id, password_hash from auth_users where email = $1",
-                    normalized_email,
-                )
-                if existing is not None:
-                    if existing["password_hash"]:
-                        raise AuthError("email_already_registered", status_code=409)
-                    user_id = existing["id"]
-                    await connection.execute(
-                        """
-                        update auth_users
-                        set password_hash = $2,
-                            password_updated_at = now(),
-                            updated_at = now()
-                        where id = $1
-                        """,
-                        user_id,
-                        password_hash,
-                    )
-                else:
-                    await connection.execute(
-                        """
-                        insert into auth_users (id, email, password_hash, password_updated_at)
-                        values ($1, $2, $3, now())
-                        """,
-                        user_id,
+        try:
+            async with pool.acquire() as connection:
+                async with connection.transaction():
+                    existing = await connection.fetchrow(
+                        "select id, password_hash from auth_users where email = $1",
                         normalized_email,
-                        password_hash,
                     )
+                    if existing is not None:
+                        if existing["password_hash"]:
+                            raise AuthError("email_already_registered", status_code=409)
+                        user_id = existing["id"]
+                        await connection.execute(
+                            """
+                            update auth_users
+                            set password_hash = $2,
+                                password_updated_at = now(),
+                                updated_at = now()
+                            where id = $1
+                            """,
+                            user_id,
+                            password_hash,
+                        )
+                    else:
+                        await connection.execute(
+                            """
+                            insert into auth_users (id, email, password_hash, password_updated_at)
+                            values ($1, $2, $3, now())
+                            """,
+                            user_id,
+                            normalized_email,
+                            password_hash,
+                        )
 
-                return await _issue_session(
-                    connection,
-                    user_id=user_id,
-                    email=normalized_email,
-                    device_id=normalized_device_id,
-                    device_name=device_name,
-                    user_agent=user_agent,
-                )
+                    return await _issue_session(
+                        connection,
+                        user_id=user_id,
+                        email=normalized_email,
+                        device_id=normalized_device_id,
+                        device_name=device_name,
+                        user_agent=user_agent,
+                    )
+        except asyncpg.UniqueViolationError as exc:
+            # Concurrent signup raced past our SELECT and inserted first.
+            raise AuthError("email_already_registered", status_code=409) from exc
 
     async def login(
         self,
@@ -278,29 +294,30 @@ class AuthRuntimeService:
     ) -> dict[str, str]:
         normalized_email = _normalize_email(email)
         if not password:
-            raise AuthError("password_required", status_code=400)
+            raise AuthError("invalid_credentials")
         normalized_device_id = device_id.strip()
         if not normalized_device_id:
             raise AuthError("device_id_required", status_code=400)
 
         pool = await get_pool()
         async with pool.acquire() as connection:
-            async with connection.transaction():
-                user_row = await connection.fetchrow(
-                    "select id, password_hash from auth_users where email = $1",
-                    normalized_email,
-                )
-                if user_row is None or not user_row["password_hash"]:
-                    raise AuthError("invalid_credentials")
-                if not _verify_password(password, user_row["password_hash"]):
-                    raise AuthError("invalid_credentials")
+            user_row = await connection.fetchrow(
+                "select id, password_hash from auth_users where email = $1",
+                normalized_email,
+            )
+            # Always run the PBKDF2 work to equalize timing between
+            # "user exists" and "user does not exist" branches.
+            stored_hash = user_row["password_hash"] if (user_row and user_row["password_hash"]) else _DUMMY_PASSWORD_HASH
+            password_ok = _verify_password(password, stored_hash)
+            if user_row is None or not user_row["password_hash"] or not password_ok:
+                raise AuthError("invalid_credentials")
 
-                user_id = user_row["id"]
+            user_id = user_row["id"]
+            async with connection.transaction():
                 await connection.execute(
                     "update auth_users set updated_at = now() where id = $1",
                     user_id,
                 )
-
                 return await _issue_session(
                     connection,
                     user_id=user_id,
@@ -426,7 +443,19 @@ class AuthRuntimeService:
         if not access_token:
             raise AuthError("authorization_required")
         session_id, _ = _parse_token(access_token)
+        await self.revoke_session_by_id(
+            session_id=str(session_id),
+            device_id=device_id,
+        )
+
+    async def revoke_session_by_id(self, *, session_id: str, device_id: str) -> None:
+        try:
+            parsed_session_id = uuid.UUID(session_id)
+        except (ValueError, AttributeError) as exc:
+            raise AuthError("invalid_token") from exc
         normalized_device_id = device_id.strip()
+        if not normalized_device_id:
+            raise AuthError("device_id_required", status_code=400)
         pool = await get_pool()
         async with pool.acquire() as connection:
             result = await connection.execute(
@@ -435,7 +464,7 @@ class AuthRuntimeService:
                 set revoked_at = coalesce(revoked_at, now())
                 where id = $1 and device_id = $2
                 """,
-                session_id,
+                parsed_session_id,
                 normalized_device_id,
             )
         if result.endswith("0"):

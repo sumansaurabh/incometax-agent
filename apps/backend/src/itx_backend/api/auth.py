@@ -68,16 +68,12 @@ async def refresh(payload: RefreshRequest) -> dict[str, str]:
 
 
 @router.post("/revoke")
-async def revoke_session(
-    authorization: Optional[str] = Header(default=None, alias="Authorization"),
-    device_id: Optional[str] = Header(default=None, alias="X-ITX-Device-ID"),
-) -> dict[str, str]:
+async def revoke_session() -> dict[str, str]:
+    auth = get_request_auth(required=True)
     try:
-        if authorization is None or not authorization.startswith("Bearer "):
-            raise AuthError("authorization_required")
-        await auth_runtime.revoke_session(
-            access_token=authorization.removeprefix("Bearer ").strip(),
-            device_id=device_id or "",
+        await auth_runtime.revoke_session_by_id(
+            session_id=auth.session_id,
+            device_id=auth.device_id,
         )
     except AuthError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.code) from exc

@@ -74,7 +74,14 @@ def create_app() -> FastAPI:
             action=request.url.path,
         )
         auth_token = None
-        if request.url.path.startswith("/api/") and not request.url.path.startswith("/api/auth"):
+        # Only these auth endpoints are unauthenticated. /me and /revoke must run
+        # through the same middleware pipeline so a single auth path governs them.
+        unauthenticated_auth_paths = {
+            "/api/auth/login",
+            "/api/auth/signup",
+            "/api/auth/refresh",
+        }
+        if request.url.path.startswith("/api/") and request.url.path not in unauthenticated_auth_paths:
             authorization = request.headers.get("Authorization")
             access_token = authorization.removeprefix("Bearer ").strip() if authorization and authorization.startswith("Bearer ") else request.query_params.get("access_token")
             device_id = request.headers.get("X-ITX-Device-ID") or request.query_params.get("device_id", "")

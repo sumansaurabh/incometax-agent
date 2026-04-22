@@ -77,19 +77,9 @@ export function defaultDeviceName(): string {
   return "Chrome extension";
 }
 
-export async function ensureFreshAuthSession(): Promise<AuthSession> {
-  const current = await loadAuthSession();
-  if (!current) {
-    throw new Error("Authentication required");
-  }
-  if (!isExpiring(current.accessExpiresAt)) {
-    return current;
-  }
-  if (isExpiring(current.refreshExpiresAt, 0)) {
-    await clearAuthSession();
-    throw new Error("Session expired");
-  }
+let inflightRefresh: Promise<AuthSession> | null = null;
 
+async function refreshSession(current: AuthSession): Promise<AuthSession> {
   const response = await fetch(`${BACKEND_BASE_URL}/api/auth/refresh`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -106,4 +96,27 @@ export async function ensureFreshAuthSession(): Promise<AuthSession> {
   const refreshed = hydrateAuthSession(payload);
   await saveAuthSession(refreshed);
   return refreshed;
+}
+
+export async function ensureFreshAuthSession(): Promise<AuthSession> {
+  const current = await loadAuthSession();
+  if (!current) {
+    throw new Error("Authentication required");
+  }
+  if (!isExpiring(current.accessExpiresAt)) {
+    return current;
+  }
+  if (isExpiring(current.refreshExpiresAt, 0)) {
+    await clearAuthSession();
+    throw new Error("Session expired");
+  }
+
+  // Ensure only one refresh is in flight at a time — the refresh token is
+  // single-use on the backend, so parallel callers must share one result.
+  if (!inflightRefresh) {
+    inflightRefresh = refreshSession(current).finally(() => {
+      inflightRefresh = null;
+    });
+  }
+  return inflightRefresh;
 }

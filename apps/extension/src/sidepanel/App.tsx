@@ -4,6 +4,7 @@ import {
   ApprovalItem,
   attachOfficialArtifact,
   AuthIdentity,
+  BackendError,
   ConsentCatalogItem,
   DetectedField,
   EverificationRecord,
@@ -408,13 +409,26 @@ export default function App(): JSX.Element {
       setIdentity(me);
       await bootstrapThread(me.user_id);
     } catch (error: unknown) {
-      await clearAuthSession();
-      await clearSidepanelSession();
-      setAuthSession(null);
-      setIdentity(null);
-      setSession(null);
-      resetThreadState();
-      appendMessage(`Initialization failed: ${error instanceof Error ? error.message : "unknown error"}`);
+      const message = error instanceof Error ? error.message : "unknown error";
+      // Only wipe the auth session when the backend actively rejects us.
+      // Transient failures (network, 5xx) should leave the session alone so
+      // the user can retry without re-entering their password.
+      const isAuthFailure =
+        error instanceof BackendError
+          ? error.isAuthFailure()
+          : message === "Authentication required" || message === "Session expired" || message === "Session refresh failed";
+      if (isAuthFailure) {
+        await clearAuthSession();
+        await clearSidepanelSession();
+        setAuthSession(null);
+        setIdentity(null);
+        setSession(null);
+        resetThreadState();
+        setAuthError("Your session ended. Please sign in again.");
+        appendMessage("Session ended — please sign in again.");
+      } else {
+        appendMessage(`Could not reach backend: ${message}. The session is still active — retry shortly.`);
+      }
     } finally {
       setIsBusy(false);
     }
@@ -1100,6 +1114,7 @@ export default function App(): JSX.Element {
       await initialize();
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Sign-in failed.";
+      setAuthPassword("");
       setAuthError(message);
       appendMessage(`Sign-in failed: ${message}`);
     } finally {
