@@ -40,7 +40,7 @@ jobs:
       - name: Install Python deps
         run: |
           python -m pip install --upgrade pip
-          python -m pip install fastapi pydantic opentelemetry-sdk opentelemetry-api asyncpg
+          python -m pip install fastapi pydantic opentelemetry-sdk opentelemetry-api opentelemetry-exporter-otlp-proto-http asyncpg redis
       - name: Build
         run: pnpm build
       - name: Lint

@@ -1,9 +1,12 @@
 from typing import Optional
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel
 
 from itx_backend.security.request_auth import get_request_auth
+from itx_backend.services.analytics import analytics_service
 from itx_backend.services.consent import missing_purposes
 from itx_backend.services.filing_runtime import filing_runtime
 from itx_backend.services.action_runtime import action_runtime
@@ -59,42 +62,59 @@ async def _require_consents(thread_id: str, purposes: list[str]) -> None:
         raise HTTPException(status_code=409, detail=f"missing_consent_purposes:{','.join(missing)}")
 
 
+async def _serialize_client_item(latest, access_role: str) -> dict:
+    activity = await action_runtime.list_thread_activity(latest.thread_id)
+    signoffs = await review_workspace.list_signoffs(latest.thread_id)
+    pending_approvals = [
+        approval
+        for approval in activity.get("approvals", [])
+        if approval.get("status") == "pending"
+    ]
+    pending_signoffs = [signoff for signoff in signoffs if signoff.get("status") != "client_approved"]
+    tax_facts = latest.tax_facts or {}
+    submission = latest.submission_summary or {}
+    support_assessment = assess_agent_state(latest, activity)
+    executions = activity.get("executions", [])
+    return {
+        "thread_id": latest.thread_id,
+        "pan": tax_facts.get("pan"),
+        "name": tax_facts.get("name"),
+        "itr_type": latest.itr_type,
+        "assessment_year": submission.get("assessment_year"),
+        "can_submit": submission.get("can_submit"),
+        "blocking_issues": submission.get("blocking_issues", []),
+        "mismatch_count": len((latest.reconciliation or {}).get("mismatches", [])),
+        "pending_approval_count": len(pending_approvals),
+        "pending_signoff_count": len(pending_signoffs),
+        "access_role": access_role,
+        "support_mode": support_assessment["mode"],
+        "can_autofill": support_assessment["can_autofill"],
+        "last_execution": executions[0] if executions else None,
+    }
+
+
 @router.get("/clients")
 async def clients() -> dict:
     auth = get_request_auth(required=True)
     items = []
     for latest, access_role in await review_workspace.list_accessible_states(user_id=auth.user_id, email=auth.email):
-        activity = await action_runtime.list_thread_activity(latest.thread_id)
-        signoffs = await review_workspace.list_signoffs(latest.thread_id)
-        pending_approvals = [
-            approval
-            for approval in activity.get("approvals", [])
-            if approval.get("status") == "pending"
-        ]
-        pending_signoffs = [signoff for signoff in signoffs if signoff.get("status") != "client_approved"]
-        tax_facts = latest.tax_facts or {}
-        submission = latest.submission_summary or {}
-        support_assessment = assess_agent_state(latest, activity)
-        executions = activity.get("executions", [])
-        items.append(
-            {
-                "thread_id": latest.thread_id,
-                "pan": tax_facts.get("pan"),
-                "name": tax_facts.get("name"),
-                "itr_type": latest.itr_type,
-                "assessment_year": submission.get("assessment_year"),
-                "can_submit": submission.get("can_submit"),
-                "blocking_issues": submission.get("blocking_issues", []),
-                "mismatch_count": len((latest.reconciliation or {}).get("mismatches", [])),
-                "pending_approval_count": len(pending_approvals),
-                "pending_signoff_count": len(pending_signoffs),
-                "access_role": access_role,
-                "support_mode": support_assessment["mode"],
-                "can_autofill": support_assessment["can_autofill"],
-                "last_execution": executions[0] if executions else None,
-            }
-        )
+        items.append(await _serialize_client_item(latest, access_role))
     return {"items": items}
+
+
+@router.get("/dashboard")
+async def dashboard() -> dict:
+    auth = get_request_auth(required=True)
+    items = [
+        await _serialize_client_item(latest, access_role)
+        for latest, access_role in await review_workspace.list_accessible_states(user_id=auth.user_id, email=auth.email)
+    ]
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "user": {"user_id": auth.user_id, "email": auth.email},
+        "clients": items,
+        "analytics": await analytics_service.dashboard(),
+    }
 
 
 @router.get("/client/{thread_id}")

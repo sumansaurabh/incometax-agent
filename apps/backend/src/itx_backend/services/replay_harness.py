@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import json
 from typing import Any, Optional
 import hashlib
+import re
 
 from itx_backend.db.session import get_pool
 
@@ -30,6 +31,65 @@ class ReplayRun:
 
 
 class ReplayHarness:
+    def _selector_present(self, dom_html: str, selector: str) -> bool:
+        selector = selector.strip()
+        if not selector:
+            return False
+
+        if "," in selector:
+            return any(self._selector_present(dom_html, part) for part in selector.split(","))
+
+        id_match = re.fullmatch(r"#([A-Za-z_][\w\-:.]*)", selector)
+        if id_match:
+            return re.search(rf"id=['\"]{re.escape(id_match.group(1))}['\"]", dom_html, re.IGNORECASE) is not None
+
+        attr_match = re.fullmatch(
+            r"(?:[A-Za-z][\w-]*)?\[(?P<attr>[A-Za-z_:][\w:.-]*)=['\"]?(?P<value>[^'\"]+)['\"]?(?:\s+[iI])?\]",
+            selector,
+        )
+        if attr_match:
+            attr = re.escape(attr_match.group("attr"))
+            value = re.escape(attr_match.group("value"))
+            return re.search(rf"{attr}=['\"]{value}['\"]", dom_html, re.IGNORECASE) is not None
+
+        tag_attr_match = re.fullmatch(
+            r"(?P<tag>[A-Za-z][\w-]*)\[(?P<attr>[A-Za-z_:][\w:.-]*)=['\"]?(?P<value>[^'\"]+)['\"]?(?:\s+[iI])?\]",
+            selector,
+        )
+        if tag_attr_match:
+            tag = re.escape(tag_attr_match.group("tag"))
+            attr = re.escape(tag_attr_match.group("attr"))
+            value = re.escape(tag_attr_match.group("value"))
+            return re.search(rf"<{tag}[^>]*{attr}=['\"]{value}['\"]", dom_html, re.IGNORECASE) is not None
+
+        return selector in dom_html
+
+    def _selectors_from_metadata(self, metadata: dict[str, Any]) -> list[str]:
+        candidates: list[str] = []
+        raw_selectors = metadata.get("expected_selectors") or metadata.get("selectors") or metadata.get("resolved_selectors")
+        if isinstance(raw_selectors, list):
+            candidates.extend(str(item) for item in raw_selectors if str(item).strip())
+
+        fields = metadata.get("fields")
+        if isinstance(fields, list):
+            for field in fields:
+                if isinstance(field, dict) and field.get("selectorHint"):
+                    candidates.append(str(field["selectorHint"]))
+
+        portal_state = metadata.get("portal_state")
+        if isinstance(portal_state, dict):
+            portal_fields = portal_state.get("fields")
+            if isinstance(portal_fields, dict):
+                for key, value in portal_fields.items():
+                    if isinstance(key, str) and any(token in key for token in ("#", "[", ".")):
+                        candidates.append(key)
+                    if isinstance(value, dict):
+                        selector = value.get("selector") or value.get("selectorHint")
+                        if selector:
+                            candidates.append(str(selector))
+
+        return list(dict.fromkeys(selector for selector in candidates if selector))
+
     async def capture_snapshot(
         self,
         thread_id: str,
@@ -99,7 +159,7 @@ class ReplayHarness:
 
         mismatches: list[dict[str, Any]] = []
         for selector in expected_selectors:
-            if selector not in snapshot.dom_html:
+            if not self._selector_present(snapshot.dom_html, selector):
                 mismatches.append(
                     {
                         "selector": selector,
@@ -264,6 +324,107 @@ class ReplayHarness:
                 {"selector": selector, "count": count}
                 for selector, count in sorted(selector_failures.items(), key=lambda item: (-item[1], item[0]))[:10]
             ],
+        }
+
+    async def run_regression_pipeline(
+        self,
+        *,
+        thread_id: Optional[str] = None,
+        page_type: Optional[str] = None,
+        limit: int = 25,
+    ) -> dict[str, Any]:
+        pool = await get_pool()
+        async with pool.acquire() as connection:
+            clauses = []
+            params: list[Any] = []
+            if thread_id is not None:
+                clauses.append(f"thread_id = ${len(params) + 1}")
+                params.append(thread_id)
+            if page_type is not None:
+                clauses.append(f"page_type = ${len(params) + 1}")
+                params.append(page_type)
+            where_clause = f"where {' and '.join(clauses)}" if clauses else ""
+            params.append(limit)
+            rows = await connection.fetch(
+                f"""
+                select snapshot_id, thread_id, page_type, metadata::text as metadata
+                from replay_snapshots
+                {where_clause}
+                order by captured_at desc
+                limit ${len(params)}
+                """,
+                *params,
+            )
+
+        totals = {
+            "snapshots_considered": len(rows),
+            "snapshots_with_selectors": 0,
+            "runs_created": 0,
+            "successful_runs": 0,
+            "failed_runs": 0,
+            "skipped_snapshots": 0,
+        }
+        by_page: dict[str, dict[str, int]] = {}
+        items: list[dict[str, Any]] = []
+
+        for row in rows:
+            metadata = json.loads(row["metadata"] or "{}")
+            selectors = self._selectors_from_metadata(metadata)
+            page_key = str(row["page_type"] or "unknown")
+            page_totals = by_page.setdefault(
+                page_key,
+                {"snapshots": 0, "runs": 0, "successes": 0, "failures": 0, "skipped": 0},
+            )
+            page_totals["snapshots"] += 1
+
+            if not selectors:
+                totals["skipped_snapshots"] += 1
+                page_totals["skipped"] += 1
+                items.append(
+                    {
+                        "snapshot_id": row["snapshot_id"],
+                        "thread_id": row["thread_id"],
+                        "page_type": page_key,
+                        "status": "skipped",
+                        "reason": "no_expected_selectors_in_metadata",
+                    }
+                )
+                continue
+
+            totals["snapshots_with_selectors"] += 1
+            run = await self.replay(str(row["snapshot_id"]), selectors)
+            totals["runs_created"] += 1
+            page_totals["runs"] += 1
+            if run.success:
+                totals["successful_runs"] += 1
+                page_totals["successes"] += 1
+            else:
+                totals["failed_runs"] += 1
+                page_totals["failures"] += 1
+
+            items.append(
+                {
+                    "snapshot_id": row["snapshot_id"],
+                    "thread_id": row["thread_id"],
+                    "page_type": page_key,
+                    "status": "passed" if run.success else "failed",
+                    "expected_selectors": selectors,
+                    "mismatches": run.mismatches,
+                    "run_id": run.run_id,
+                }
+            )
+
+        success_rate = (
+            round(totals["successful_runs"] / totals["runs_created"], 4)
+            if totals["runs_created"]
+            else 1.0
+        )
+        return {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "filters": {"thread_id": thread_id, "page_type": page_type, "limit": limit},
+            "totals": {**totals, "success_rate": success_rate},
+            "by_page": by_page,
+            "items": items,
         }
 
     async def purge_thread(self, thread_id: str) -> None:

@@ -195,14 +195,14 @@ Current state:
 - Analytics event timelines and dashboard totals are now persisted in Postgres and covered by a backend API test.
 - Analytics dashboards now also surface replay success, drift telemetry, runtime health, tracing configuration, and agent-node observability summaries.
 - Redis-backed runtime state now exists for rate limiting and agent-event buffering when configured, with in-memory fallback for local development.
-- Replay logic still only checks selector presence in captured HTML.
+- Replay now supports selector-aware regression runs and a replay-pipeline endpoint that can re-run selector-backed snapshots in batch.
 - Analytics are better than before but still not a full operations pipeline with scheduled baselines, alerts, or historical investigation tooling.
 - Drift autopilot groups failures and returns recommendations, but it is not a true nightly regeneration pipeline.
 
 Why it matters:
 
 - Durable replay is now a real reliability primitive.
-- The operating model is materially better, but replay is not yet a full regression pipeline and the observability layer still needs alerting and longer-term operational workflows.
+- The operating model is materially better, but replay still needs scheduled baselines and the observability layer still needs alerting and longer-term operational workflows.
 
 ### 5. CA workspace is API-capable, but dashboard depth is not there yet
 
@@ -215,13 +215,13 @@ Verified in:
 Current state:
 
 - Backend APIs for client lists, client detail, handoffs, sign-offs, and exports exist.
-- The web dashboard now has a typed operational model for overview metrics, queues, replay/drift alerts, and per-client triage recommendations on top of the CA APIs.
-- It is still not a fully shipped multi-user operations UI.
+- The web dashboard now ships a real Vite-based login, queue, replay-trigger, and operations-alert UI on top of the CA APIs.
+- It is still not a fully mature multi-user operations product with richer workflows, filtering, and drilldowns.
 
 Why it matters:
 
 - The reviewer workflow is technically present.
-- The CA workspace is more than API-only now, but it is still not yet a market-ready multi-client review product.
+- The CA workspace is now more than API-only and more than a typed helper, but it is still not yet a market-ready multi-client review product.
 
 ### 6. Consent handling is materially better, but policy depth is still limited
 
@@ -262,6 +262,7 @@ Current state:
 - The `/health` endpoint now exposes detailed check output including runtime cache and observability configuration status.
 - Langfuse-compatible OTLP tracing configuration, AI-provider configuration, and Redis runtime-cache readiness are now part of the runtime contract.
 - Agent-node execution telemetry now exists as a first-class observable stream.
+- Docker Compose now wires Postgres, Redis, backend, workers, and the CA dashboard together with AI-provider, Langfuse, OTLP, and Redis environment hooks.
 - Observability is still shallow beyond those foundations because alert delivery, long-term traces, and operator dashboards are not fully built out.
 
 Why it matters:
@@ -305,8 +306,8 @@ It is not market-complete for the broader Indian filing market because it still 
 1. Expand the current fixture-backed filing-path adapters into broader captured production portal coverage.
 2. Expand rules-core from the current broader baseline into real complex-taxpayer coverage.
 3. Expand the new parser-regression bank from synthetic fixtures into broader production-like extraction scorecards.
-4. Turn durable replay and durable analytics into a real portal-regression and operations pipeline.
-5. Build a real CA dashboard on top of the existing APIs.
+4. Deepen the new replay-pipeline and analytics baseline into scheduled portal-regression and operations workflows.
+5. Deepen the newly shipped CA dashboard into a fuller multi-client operations product.
 6. Deepen consent policy granularity and operator review UX.
 7. Deepen validation-help translation and selector-drift recovery UX.
 8. Strengthen observability, alerts, and environment health coverage.

@@ -2,10 +2,18 @@
   "name": "@itx/web-dashboard",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
-    "build": "echo 'web-dashboard build placeholder'",
-    "dev": "echo 'web-dashboard dev placeholder'",
-    "test": "echo 'web-dashboard tests placeholder'",
-    "lint": "echo 'web-dashboard lint placeholder'"
+    "build": "vite build",
+    "dev": "vite",
+    "test": "tsx --test src/**/*.test.ts",
+    "lint": "tsc --noEmit",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^24.6.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.10"
   }
 }

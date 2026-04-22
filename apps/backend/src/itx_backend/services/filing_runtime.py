@@ -1001,6 +1001,7 @@ class FilingRuntimeService:
                     returning id
                     """,
                     base_thread_id,
+                    itr_u_thread_id,
                     now,
                     confirmed_by,
                 )

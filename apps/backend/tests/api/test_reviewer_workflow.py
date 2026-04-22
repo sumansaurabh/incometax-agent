@@ -22,6 +22,7 @@ from itx_backend.api.ca_workspace import (
     request_reviewer_signoff,
     reviewer_counter_consent,
     reviewer_decision,
+    dashboard,
 )
 from itx_backend.api.filing import ConsentGrantItem, ConsentGrantRequest, grant_consents
 from itx_backend.db.session import close_connection_pool, get_pool, init_connection_pool
@@ -141,6 +142,10 @@ class ReviewerWorkflowApiTest(unittest.IsolatedAsyncioTestCase):
             ReviewerDecisionRequest(approved=True, note="Looks correct based on Form 16."),
         )
         self.assertEqual(reviewed["status"], "reviewer_approved")
+
+        dashboard_snapshot = await dashboard()
+        self.assertEqual(dashboard_snapshot["clients"][0]["thread_id"], thread_id)
+        self.assertIn("analytics", dashboard_snapshot)
 
         self._bind_auth(owner_user_id, "owner@example.com")
         blocked = await execute(ActionExecutionRequest(thread_id=thread_id))

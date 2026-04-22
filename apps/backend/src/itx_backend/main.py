@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
@@ -49,6 +50,15 @@ async def lifespan(_: FastAPI):
 def create_app() -> FastAPI:
     setup_tracing()
     app = FastAPI(title=settings.app_name, version=settings.app_version, lifespan=lifespan)
+    allowed_origins = [origin.strip() for origin in settings.allowed_origins_csv.split(",") if origin.strip()]
+    if allowed_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=allowed_origins,
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
 
     @app.middleware("http")
     async def request_guard(request: Request, call_next):

@@ -5,7 +5,7 @@ import unittest
 
 from itx_backend.agent.checkpointer import checkpointer
 from itx_backend.agent.state import AgentState
-from itx_backend.api.replay import CaptureSnapshotRequest, ReplayRequest, capture, replay, runs, snapshots
+from itx_backend.api.replay import CaptureSnapshotRequest, ReplayPipelineRequest, ReplayRequest, capture, replay, replay_dashboard, replay_pipeline, runs, snapshots
 from itx_backend.db.session import close_connection_pool, get_pool, init_connection_pool
 from itx_backend.security.request_auth import reset_request_auth, set_request_auth
 from itx_backend.services.auth_runtime import AuthContext
@@ -78,9 +78,8 @@ class ReplayApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(snapshot_items["items"][0]["thread_id"], "thread-replay-1")
         self.assertEqual(len(run_items["items"]), 1)
         self.assertEqual(run_items["items"][0]["snapshot_id"], captured["snapshot_id"])
-        await close_connection_pool()
 
-    async def test_capture_and_replay_are_persisted(self) -> None:
+    async def test_replay_pipeline_uses_metadata_selectors(self) -> None:
         self._bind_auth("user-replay")
         await checkpointer.save(
             AgentState(
@@ -97,19 +96,20 @@ class ReplayApiTest(unittest.IsolatedAsyncioTestCase):
                 page_type="salary-schedule",
                 dom_html="<input id='grossSalary' /><input id='employerName' />",
                 url="https://www.incometax.gov.in/salary",
-                metadata={"source": "test"},
+                metadata={"source": "test", "expected_selectors": ["#grossSalary", "#employerName"]},
             )
         )
-        self.assertIn("snapshot_id", captured)
 
-        replayed = await replay(
-            ReplayRequest(
-                snapshot_id=captured["snapshot_id"],
-                expected_selectors=["grossSalary", "missingSelector"],
-            )
+        dashboard_items = await replay_dashboard()
+        self.assertEqual(dashboard_items["totals"]["snapshots"], 1)
+
+        pipeline = await replay_pipeline(
+            ReplayPipelineRequest(thread_id="thread-replay-1", limit=10)
         )
-        self.assertFalse(replayed["success"])
-        self.assertEqual(replayed["mismatches"][0]["selector"], "missingSelector")
+        self.assertEqual(pipeline["totals"]["snapshots_considered"], 1)
+        self.assertEqual(pipeline["totals"]["runs_created"], 1)
+        self.assertEqual(pipeline["totals"]["successful_runs"], 1)
+        self.assertEqual(pipeline["items"][0]["status"], "passed")
 
         snapshot_items = await snapshots(thread_id="thread-replay-1")
         run_items = await runs()

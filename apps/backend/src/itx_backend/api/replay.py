@@ -4,6 +4,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import Optional
 
+from itx_backend.security.request_auth import get_request_auth
 from itx_backend.security.request_auth import require_thread_state
 from itx_backend.services.replay_harness import replay_harness
 
@@ -21,6 +22,12 @@ class CaptureSnapshotRequest(BaseModel):
 class ReplayRequest(BaseModel):
     snapshot_id: str
     expected_selectors: list[str]
+
+
+class ReplayPipelineRequest(BaseModel):
+    thread_id: Optional[str] = None
+    page_type: Optional[str] = None
+    limit: int = 25
 
 
 @router.post("/capture")
@@ -62,3 +69,21 @@ async def snapshots(thread_id: Optional[str] = None) -> dict:
 @router.get("/runs")
 async def runs() -> dict:
     return {"items": await replay_harness.list_runs()}
+
+
+@router.get("/dashboard")
+async def replay_dashboard() -> dict:
+    get_request_auth(required=True)
+    return await replay_harness.dashboard()
+
+
+@router.post("/pipeline")
+async def replay_pipeline(payload: ReplayPipelineRequest) -> dict:
+    get_request_auth(required=True)
+    if payload.thread_id is not None:
+        await require_thread_state(payload.thread_id)
+    return await replay_harness.run_regression_pipeline(
+        thread_id=payload.thread_id,
+        page_type=payload.page_type,
+        limit=payload.limit,
+    )

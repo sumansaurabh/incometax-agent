@@ -41,6 +41,7 @@ class Settings(BaseModel):
     ai_model: str = os.getenv("ITX_AI_MODEL", "")
     ai_api_key: str = os.getenv("ITX_AI_API_KEY", os.getenv("OPENAI_API_KEY", os.getenv("ANTHROPIC_API_KEY", "")))
     ai_base_url: str = os.getenv("ITX_AI_BASE_URL", "")
+    allowed_origins_csv: str = os.getenv("ITX_ALLOWED_ORIGINS", "http://localhost:4173,http://localhost:5173")
 
 
 settings = Settings()
