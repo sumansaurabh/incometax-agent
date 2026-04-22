@@ -1,0 +1,259 @@
+{
+  "topic": "portal_how_to",
+  "entries": [
+    {
+      "id": "file_itr",
+      "title": "How to file your Income Tax Return on the e-Filing portal",
+      "aliases": ["file itr", "how to file return", "submit itr", "itr filing steps", "how do i file"],
+      "destination": {
+        "url": "https://eportal.incometax.gov.in/iec/foservices/#/pre-login/itrStatus",
+        "label": "e-Filing portal → e-File → Income Tax Returns → File Income Tax Return"
+      },
+      "steps": [
+        "Log in to eportal.incometax.gov.in with your PAN/Aadhaar and password.",
+        "Go to e-File → Income Tax Returns → File Income Tax Return.",
+        "Select the Assessment Year (e.g. 2025-26 for FY 2024-25) and mode 'Online'.",
+        "Choose status: Individual, HUF, or Other.",
+        "Pick the correct ITR form (ITR-1 / ITR-2 / ITR-3 / ITR-4). Use the eligibility checker if unsure.",
+        "Validate your pre-filled data against your Form 16, AIS, TIS, and Form 26AS.",
+        "Fill in the applicable schedules, confirm deductions, preview tax, and submit.",
+        "e-Verify within 30 days using Aadhaar OTP, net banking, bank EVC, or DSC — otherwise the return is treated as not filed."
+      ]
+    },
+    {
+      "id": "check_refund_status",
+      "title": "How to check your income-tax refund status",
+      "aliases": ["refund status", "check refund", "where is my refund", "when will i get refund"],
+      "destination": {
+        "url": "https://eportal.incometax.gov.in/iec/foservices/#/login",
+        "label": "e-Filing portal → Services → Know your Refund Status"
+      },
+      "steps": [
+        "Log in to eportal.incometax.gov.in.",
+        "Go to Services → Know your Refund Status. You may also use e-File → Income Tax Returns → View Filed Returns.",
+        "Select the Assessment Year.",
+        "The status shows Refund Issued / Processed With Refund Due / Processed With No Refund / Under Processing / Not Determined.",
+        "For refunds issued but not credited, check the bank account number and pre-validation. If pre-validation failed, re-validate under Profile → My Bank Account."
+      ]
+    },
+    {
+      "id": "e_verify_return",
+      "title": "How to e-Verify your filed return",
+      "aliases": ["e-verify", "everify", "verify itr", "verify return", "evc"],
+      "destination": {
+        "url": "https://eportal.incometax.gov.in/iec/foservices/#/login",
+        "label": "e-Filing portal → e-File → Income Tax Returns → e-Verify Return"
+      },
+      "steps": [
+        "Log in to eportal.incometax.gov.in.",
+        "Go to e-File → Income Tax Returns → e-Verify Return.",
+        "Choose the return to verify.",
+        "Pick one: (a) Aadhaar OTP — mobile must be linked to Aadhaar; (b) Net banking — log in to your bank and select 'e-Filing'; (c) Bank Account EVC — bank must be pre-validated & EVC-enabled; (d) Demat EVC; (e) DSC — required for companies/firms and for returns filed after the 30-day window.",
+        "Complete the OTP/credential step. You'll see 'Return successfully e-Verified' and receive an acknowledgement."
+      ]
+    },
+    {
+      "id": "download_form_26as",
+      "title": "How to download Form 26AS",
+      "aliases": ["form 26as", "26as", "download 26as", "annual tax statement"],
+      "destination": {
+        "url": "https://eportal.incometax.gov.in/iec/foservices/#/login",
+        "label": "e-Filing portal → e-File → Income Tax Returns → View Form 26AS"
+      },
+      "steps": [
+        "Log in to eportal.incometax.gov.in.",
+        "Go to e-File → Income Tax Returns → View Form 26AS (TDS). Confirm the disclaimer to go to TRACES.",
+        "On TRACES, select 'View Tax Credit (Form 26AS/Annual Tax Statement)'.",
+        "Choose the Assessment Year and view format: HTML (view) or Text/PDF (download).",
+        "For the PDF, open with password = PAN in lowercase + date of birth as DDMMYYYY (e.g. aaapa1234a01011990)."
+      ]
+    },
+    {
+      "id": "download_ais",
+      "title": "How to download AIS and TIS",
+      "aliases": ["ais", "tis", "annual information statement", "taxpayer information summary", "download ais"],
+      "destination": {
+        "url": "https://eportal.incometax.gov.in/iec/foservices/#/login",
+        "label": "e-Filing portal → Services → Annual Information Statement (AIS)"
+      },
+      "steps": [
+        "Log in to eportal.incometax.gov.in.",
+        "Go to Services → Annual Information Statement (AIS). You'll be routed to the AIS home page.",
+        "Pick the Financial Year.",
+        "Open AIS tile to see detailed reported transactions (salary, interest, dividends, mutual funds, securities, foreign remittance, rent, property).",
+        "Open TIS tile for the summarised taxpayer view used for pre-filling.",
+        "Use the download button to get JSON, PDF, or CSV. JSON/CSV are friendliest for reconciliation.",
+        "Password for the downloaded PDF = PAN in lowercase + date of birth as DDMMYYYY."
+      ]
+    },
+    {
+      "id": "update_bank_account",
+      "title": "How to add or pre-validate a bank account for refund",
+      "aliases": ["pre-validate bank", "add bank account", "bank validation", "refund bank"],
+      "destination": {
+        "url": "https://eportal.incometax.gov.in/iec/foservices/#/login",
+        "label": "e-Filing portal → Profile → My Bank Account"
+      },
+      "steps": [
+        "Log in to eportal.incometax.gov.in.",
+        "Go to Profile → My Bank Account.",
+        "Click Add Bank Account. Enter bank name, account number, IFSC, and account type.",
+        "Submit. Status becomes 'Validation in progress'. Validation is bank-side and typically settles within 10-12 hours.",
+        "Once 'Validated', set it as Nominate for Refund. For EVC, the account must also be EVC-enabled on your bank side.",
+        "If validation fails, confirm your name on the bank account exactly matches your PAN name (including initials)."
+      ]
+    },
+    {
+      "id": "revised_return",
+      "title": "How to file a revised return under section 139(5)",
+      "aliases": ["revised return", "139(5)", "amend return", "correction in itr", "wrong itr"],
+      "destination": {
+        "url": "https://eportal.incometax.gov.in/iec/foservices/#/login",
+        "label": "e-Filing portal → e-File → Income Tax Returns → File Income Tax Return → Revised Return u/s 139(5)"
+      },
+      "steps": [
+        "File a revised return ONLY if the original return has been filed and you need to correct it.",
+        "Deadline: on or before 31 December of the relevant assessment year, or before completion of assessment, whichever is earlier.",
+        "Log in and go to e-File → Income Tax Returns → File Income Tax Return.",
+        "In the filing options pick 'Revised Return under section 139(5)'.",
+        "Enter the acknowledgement number and date of the original return (found in the original ITR-V).",
+        "Correct the affected figures. The rest carries over from the original.",
+        "Submit and e-Verify within 30 days."
+      ]
+    },
+    {
+      "id": "belated_return",
+      "title": "How to file a belated return under section 139(4)",
+      "aliases": ["belated return", "139(4)", "late return", "missed due date"],
+      "destination": {
+        "url": "https://eportal.incometax.gov.in/iec/foservices/#/login",
+        "label": "e-Filing portal → e-File → Income Tax Returns → File Income Tax Return → Belated Return u/s 139(4)"
+      },
+      "steps": [
+        "A belated return is allowed after the original due date but before 31 December of the AY (e.g. 31-Dec-2025 for AY 2025-26) or before assessment, whichever is earlier.",
+        "Late fee under 234F applies: ₹1,000 if total income ≤ ₹5 lakh, else ₹5,000.",
+        "Interest under 234A accrues from the original due date on unpaid tax.",
+        "You cannot carry forward business or capital-loss losses in a belated return (except house-property loss).",
+        "File as usual and select 'Belated Return under section 139(4)' in the filing options, then e-Verify within 30 days."
+      ]
+    },
+    {
+      "id": "updated_return",
+      "title": "How to file an updated return (ITR-U) under section 139(8A)",
+      "aliases": ["itr-u", "updated return", "139(8a)", "after due date", "missed filing"],
+      "destination": {
+        "url": "https://eportal.incometax.gov.in/iec/foservices/#/login",
+        "label": "e-Filing portal → e-File → Income Tax Returns → File Updated Return (ITR-U)"
+      },
+      "steps": [
+        "ITR-U can be filed up to 48 months from the end of the relevant AY (extended window from FY 2024-25 onwards).",
+        "Permitted when you missed filing, under-reported income, misclassified income, or chose the wrong regime/head.",
+        "Not allowed when the update reduces tax liability, increases refund, creates/increases a loss, or when an assessment is pending.",
+        "Additional tax: 25% of (tax + interest) if filed within 12 months of AY end; 50% within 12-24 months; 60% within 24-36 months; 70% within 36-48 months.",
+        "Attach a valid reason code (e.g. 'Income not reported correctly') on submission.",
+        "File through e-File → Income Tax Returns → File Updated Return, review summary, pay the challan, submit, then e-Verify."
+      ]
+    },
+    {
+      "id": "pay_tax_challan",
+      "title": "How to pay self-assessment or advance tax (Challan 280)",
+      "aliases": ["pay tax", "challan 280", "advance tax", "self assessment tax", "pay itns 280"],
+      "destination": {
+        "url": "https://eportal.incometax.gov.in/iec/foservices/#/e-pay-tax-prelogin/user-details",
+        "label": "e-Filing portal → e-Pay Tax"
+      },
+      "steps": [
+        "Go to e-Filing portal → e-Pay Tax. You can pay with or without login.",
+        "Enter PAN (for individuals) or TAN (for deductors). Confirm name. Enter mobile OTP.",
+        "Choose the right tax type: (100) Advance Tax, (300) Self-Assessment Tax, (400) Tax on Regular Assessment, or (102)/(106) for corporates.",
+        "Pick the correct Assessment Year — this is the biggest source of mistakes. For tax on income earned in FY 2024-25, AY = 2025-26.",
+        "Select a payment mode: Net Banking, Debit Card, NEFT/RTGS, Pay at bank counter, UPI, or Credit Card (limited banks).",
+        "Download the CIN-bearing challan receipt (BSR code + challan serial + date). You'll need this for your ITR's Tax Paid schedule."
+      ]
+    },
+    {
+      "id": "register_portal",
+      "title": "How to register on the e-Filing portal",
+      "aliases": ["register", "new user", "sign up", "first time", "create account"],
+      "destination": {
+        "url": "https://eportal.incometax.gov.in/iec/foservices/#/register",
+        "label": "e-Filing portal → Register"
+      },
+      "steps": [
+        "Go to eportal.incometax.gov.in → Register.",
+        "Enter your PAN. The system validates against CBDT records.",
+        "Fill in basic details — name, date of birth, residential status. Must match your PAN card exactly.",
+        "Provide an Indian mobile number and personal email — both are verified by OTP.",
+        "Set a strong password (8-14 characters, one uppercase, one lowercase, one digit, one special character).",
+        "Set a personalised message (anti-phishing). Complete Captcha and submit.",
+        "On success, you'll receive an email/SMS confirmation; log in with your PAN as user ID."
+      ]
+    },
+    {
+      "id": "link_aadhaar",
+      "title": "How to link Aadhaar with PAN",
+      "aliases": ["link aadhaar", "aadhaar pan", "aadhaar linking"],
+      "destination": {
+        "url": "https://eportal.incometax.gov.in/iec/foservices/#/pre-login/link-aadhaar",
+        "label": "e-Filing portal → Link Aadhaar"
+      },
+      "steps": [
+        "Go to eportal.incometax.gov.in → Quick Links → Link Aadhaar.",
+        "Enter your PAN and Aadhaar. Click Validate.",
+        "If already linked, you'll see 'Aadhaar is already linked with PAN'. Otherwise proceed.",
+        "A late fee of ₹1,000 (u/s 234H) currently applies if linking after 30-Jun-2022 — pay via e-Pay Tax → Challan 280, Minor Head (500) → Other Receipts, under the same PAN.",
+        "After payment wait 4-5 working days, then retry linking. Confirm OTP on Aadhaar-registered mobile.",
+        "A failed linking keeps PAN inoperative — no refund processing, no filing, higher TDS under 206AA."
+      ]
+    },
+    {
+      "id": "rectification_154",
+      "title": "How to file a rectification under section 154",
+      "aliases": ["rectification", "154", "fix itr", "correct intimation", "143(1) error"],
+      "destination": {
+        "url": "https://eportal.incometax.gov.in/iec/foservices/#/login",
+        "label": "e-Filing portal → Services → Rectification"
+      },
+      "steps": [
+        "Use a Rectification request u/s 154 only to correct an apparent mistake in the intimation u/s 143(1) — NOT to change the return itself. For changing the return, file a revised return u/s 139(5) while within the window.",
+        "Log in, go to Services → Rectification.",
+        "Select the order/intimation u/s 143(1) to rectify. Enter its reference/communication number.",
+        "Pick a request type: Reprocess the return, Tax credit mismatch correction (TDS/TCS/Challan), Return data correction (via XML upload) etc.",
+        "Submit and note the acknowledgement. The AO/CPC reviews and issues a fresh intimation."
+      ]
+    },
+    {
+      "id": "download_itrv",
+      "title": "How to download ITR-V / acknowledgement",
+      "aliases": ["itr-v", "acknowledgement", "download itr", "filed return download"],
+      "destination": {
+        "url": "https://eportal.incometax.gov.in/iec/foservices/#/login",
+        "label": "e-Filing portal → e-File → Income Tax Returns → View Filed Returns"
+      },
+      "steps": [
+        "Log in to eportal.incometax.gov.in.",
+        "Go to e-File → Income Tax Returns → View Filed Returns.",
+        "Pick the AY. Click 'Download Form' next to the return to get the ITR-V / acknowledgement PDF.",
+        "Password for the ITR-V PDF = PAN in lowercase + date of birth as DDMMYYYY (e.g. aaapa1234a01011990).",
+        "If the return is e-Verified, the ITR-V is final; if not, verify within 30 days or the filing lapses."
+      ]
+    },
+    {
+      "id": "raise_grievance",
+      "title": "How to raise a grievance on the e-Filing portal",
+      "aliases": ["grievance", "complaint", "file complaint", "portal issue"],
+      "destination": {
+        "url": "https://eportal.incometax.gov.in/iec/foservices/#/login",
+        "label": "e-Filing portal → Grievances → Submit Grievance"
+      },
+      "steps": [
+        "Log in to eportal.incometax.gov.in.",
+        "Go to Grievances → Submit Grievance.",
+        "Select category: e-Filing / CPC-ITR / AO / NSDL / Others. Pick the most specific sub-category.",
+        "Describe the issue (max 2000 chars). Attach screenshots/PDFs if relevant (max 5MB per file).",
+        "Submit. You'll receive a grievance ID. Track under Grievances → Grievance Status.",
+        "First response is typically within 15-30 working days."
+      ]
+    }
+  ]
+}
