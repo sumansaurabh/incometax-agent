@@ -663,11 +663,25 @@ export async function revokeCurrentSession(): Promise<void> {
   await request<{ status: string }>("/api/auth/revoke", { method: "POST" });
 }
 
-export async function ensureThread(userId: string, threadId?: string | null): Promise<{ thread_id: string; user_id: string }> {
+export async function ensureThread(userId: string, threadId?: string | null, forceNew = false): Promise<{ thread_id: string; user_id: string }> {
   return request<{ thread_id: string; user_id: string }>("/api/threads/ensure", {
     method: "POST",
-    body: JSON.stringify({ user_id: userId, thread_id: threadId ?? null }),
+    body: JSON.stringify({ user_id: userId, thread_id: threadId ?? null, force_new: forceNew }),
   });
+}
+
+export type ThreadSummary = {
+  thread_id: string;
+  user_id: string;
+  current_node: string;
+  itr_type: string;
+  submission_status: string;
+  archived: boolean;
+  document_count: number;
+};
+
+export async function fetchMyThreads(): Promise<{ threads: ThreadSummary[] }> {
+  return request<{ threads: ThreadSummary[] }>("/api/threads/mine");
 }
 
 export async function fetchThreadActions(threadId: string): Promise<ThreadActionsResponse> {

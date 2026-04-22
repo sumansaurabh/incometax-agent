@@ -22,6 +22,7 @@ class ThreadStartRequest(BaseModel):
 class ThreadEnsureRequest(BaseModel):
     user_id: Optional[str] = None
     thread_id: Optional[str] = None
+    force_new: bool = False
 
 
 @router.post("/start")
@@ -47,10 +48,47 @@ async def ensure_thread(payload: ThreadEnsureRequest) -> AgentState:
         existing = await require_thread_state(payload.thread_id)
         return existing
 
-    state = AgentState(thread_id=payload.thread_id or str(uuid.uuid4()), user_id=user_id)
+    if not payload.force_new:
+        # Look up the most recent non-archived thread for this user before
+        # creating a new one.  This prevents the sidepanel from generating a
+        # fresh thread_id on every session restart, which would lose visibility
+        # of documents uploaded on an earlier thread (e.g. via the dashboard).
+        existing_for_user = await checkpointer.latest_for_user(user_id)
+        if existing_for_user is not None:
+            await analytics_service.track("thread_ensured", "reuse", existing_for_user.thread_id, {"user_id": user_id})
+            return existing_for_user
+
+    state = AgentState(thread_id=str(uuid.uuid4()), user_id=user_id)
     await checkpointer.save(state)
     await analytics_service.track("thread_ensured", "bootstrap", state.thread_id, {"user_id": user_id})
     return state
+
+
+@router.get("/mine")
+async def list_my_threads() -> dict[str, Any]:
+    """Return all threads belonging to the authenticated user."""
+    auth = get_request_auth(required=True)
+    states = await checkpointer.list_for_user(auth.user_id)
+    threads = []
+    for state in states:
+        # Count documents per thread for the summary
+        doc_count = 0
+        try:
+            from itx_backend.services.documents import document_service
+            docs = await document_service.list_documents(state.thread_id)
+            doc_count = len(docs)
+        except Exception:
+            pass
+        threads.append({
+            "thread_id": state.thread_id,
+            "user_id": state.user_id,
+            "current_node": state.current_node,
+            "itr_type": state.itr_type,
+            "submission_status": state.submission_status,
+            "archived": state.archived,
+            "document_count": doc_count,
+        })
+    return {"threads": threads}
 
 
 @router.get("/{thread_id}")

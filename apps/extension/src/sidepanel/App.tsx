@@ -481,10 +481,44 @@ export default function App(): JSX.Element {
     try {
       await clearSidepanelSession();
       setMessages([makeWelcomeMessage()]);
-      await bootstrapThread(identity.user_id, consentCatalog);
+      // force_new=true to create a fresh thread instead of reusing an existing one
+      const ensured = await ensureThread(identity.user_id, null, true);
+      const nextSession = { threadId: ensured.thread_id, userId: ensured.user_id };
+      await saveSidepanelSession(nextSession);
+      setSession(nextSession);
+      await autoGrantPilotConsents(nextSession.threadId, consentCatalog).catch(() => undefined);
+      await Promise.all([refreshSnapshot(), refreshBackendState(nextSession.threadId), loadChatForThread(nextSession.threadId)]);
       setSettingsOpen(false);
     } catch (error: unknown) {
       appendErrorMessage(`Could not start a new conversation: ${error instanceof Error ? error.message : "unknown error"}`);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const handleSwitchThread = async (targetThreadId: string) => {
+    if (!identity) return;
+    if (targetThreadId === session?.threadId) return;
+    setIsBusy(true);
+    try {
+      const ensured = await ensureThread(identity.user_id, targetThreadId);
+      const nextSession = { threadId: ensured.thread_id, userId: ensured.user_id };
+      await saveSidepanelSession(nextSession);
+      setSession(nextSession);
+      setDocuments([]);
+      setFillPlan(null);
+      setApprovals([]);
+      setSupportAssessment(null);
+      setRegimePreview(null);
+      setFactCount(0);
+      await Promise.all([
+        refreshBackendState(nextSession.threadId),
+        loadChatForThread(nextSession.threadId),
+      ]);
+      setSettingsOpen(false);
+      appendAgentMessage(`Switched to thread **${nextSession.threadId.slice(0, 8)}**. Documents and filing state have been refreshed.`);
+    } catch (error: unknown) {
+      appendErrorMessage(`Could not switch thread: ${error instanceof Error ? error.message : "unknown error"}`);
     } finally {
       setIsBusy(false);
     }
@@ -732,6 +766,7 @@ export default function App(): JSX.Element {
         isBusy={isBusy}
         onClose={() => setSettingsOpen(false)}
         onNewConversation={() => void handleNewConversation()}
+        onSwitchThread={(targetThreadId) => void handleSwitchThread(targetThreadId)}
         onSignOut={() => void handleLogout()}
       />
     </main>

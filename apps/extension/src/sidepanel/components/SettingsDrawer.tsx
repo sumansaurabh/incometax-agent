@@ -1,4 +1,6 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
+
+import { fetchMyThreads, ThreadSummary } from "../backend";
 
 type Props = {
   open: boolean;
@@ -9,6 +11,7 @@ type Props = {
   isBusy: boolean;
   onClose: () => void;
   onNewConversation: () => void;
+  onSwitchThread: (threadId: string) => void;
   onSignOut: () => void;
 };
 
@@ -21,8 +24,21 @@ export function SettingsDrawer({
   isBusy,
   onClose,
   onNewConversation,
+  onSwitchThread,
   onSignOut,
 }: Props): JSX.Element | null {
+  const [threads, setThreads] = useState<ThreadSummary[]>([]);
+  const [loadingThreads, setLoadingThreads] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setLoadingThreads(true);
+    fetchMyThreads()
+      .then((result) => setThreads(result.threads))
+      .catch(() => setThreads([]))
+      .finally(() => setLoadingThreads(false));
+  }, [open]);
+
   if (!open) return null;
 
   return (
@@ -39,7 +55,7 @@ export function SettingsDrawer({
         </header>
         <dl>
           <div>
-            <dt>Thread</dt>
+            <dt>Active thread</dt>
             <dd>{threadId ? threadId.slice(0, 8) : "Not started"}</dd>
           </div>
           <div>
@@ -55,6 +71,40 @@ export function SettingsDrawer({
             <dd>Pilot auto-allow</dd>
           </div>
         </dl>
+
+        <div className="thread-picker">
+          <p className="thread-picker-label">Switch thread</p>
+          {loadingThreads && <p className="thread-picker-loading">Loading threads...</p>}
+          {!loadingThreads && threads.length === 0 && (
+            <p className="thread-picker-empty">No threads found.</p>
+          )}
+          {!loadingThreads && threads.length > 0 && (
+            <ul className="thread-list">
+              {threads.map((thread) => {
+                const isActive = thread.thread_id === threadId;
+                return (
+                  <li key={thread.thread_id} className={`thread-item${isActive ? " active" : ""}${thread.archived ? " archived" : ""}`}>
+                    <button
+                      className="thread-item-button"
+                      type="button"
+                      disabled={isActive || isBusy}
+                      onClick={() => onSwitchThread(thread.thread_id)}
+                    >
+                      <span className="thread-item-id">{thread.thread_id.slice(0, 8)}</span>
+                      <span className="thread-item-meta">
+                        {thread.itr_type} · {thread.submission_status}
+                        {thread.document_count > 0 ? ` · ${thread.document_count} doc${thread.document_count !== 1 ? "s" : ""}` : ""}
+                        {thread.archived ? " · archived" : ""}
+                      </span>
+                      {isActive && <span className="thread-item-active-badge">active</span>}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+
         <button className="chat-button secondary" type="button" disabled={isBusy} onClick={onNewConversation}>
           New conversation
         </button>

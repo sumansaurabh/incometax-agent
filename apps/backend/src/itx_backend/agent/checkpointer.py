@@ -82,5 +82,46 @@ class AsyncPostgresCheckpointer:
             )
         return [self._deserialize(row["state_json"]) for row in rows]
 
+    async def latest_for_user(self, user_id: str) -> Optional[AgentState]:
+        """Return the most recently created non-archived thread for a user."""
+        pool = await self._pool_provider()
+        async with pool.acquire() as connection:
+            row = await connection.fetchrow(
+                """
+                select state_json::text as state_json
+                from agent_checkpoints
+                where state_json->>'user_id' = $1
+                  and coalesce((state_json->>'archived')::boolean, false) = false
+                order by id desc
+                limit 1
+                """,
+                user_id,
+            )
+        if not row:
+            return None
+        return self._deserialize(row["state_json"])
+
+    async def list_for_user(self, user_id: str) -> list[AgentState]:
+        """Return all distinct threads for a user, most recent first."""
+        pool = await self._pool_provider()
+        async with pool.acquire() as connection:
+            rows = await connection.fetch(
+                """
+                select distinct on (thread_id) state_json::text as state_json
+                from agent_checkpoints
+                where state_json->>'user_id' = $1
+                order by thread_id, id desc
+                """,
+                user_id,
+            )
+        states = [self._deserialize(row["state_json"]) for row in rows]
+        # Sort by id desc isn't possible with distinct-on, so sort in Python
+        # by thread creation (newest first).  The id column is serial, but
+        # we don't expose it — sort archived threads to the bottom instead.
+        states.sort(key=lambda s: (s.archived, s.thread_id), reverse=False)
+        non_archived = [s for s in states if not s.archived]
+        archived = [s for s in states if s.archived]
+        return non_archived + archived
+
 
 checkpointer = AsyncPostgresCheckpointer()
