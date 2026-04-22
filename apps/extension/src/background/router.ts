@@ -261,6 +261,21 @@ export function initRouter(): void {
       return true;
     }
 
+    if (msg?.type === "open_side_panel") {
+      void (async () => {
+        const tabId = msg.payload?.tabId ?? await getTrustedActiveTabId();
+        const tab = await chrome.tabs.get(tabId);
+        await openSidePanelForTab(tab);
+        sendResponse({ ok: true });
+      })().catch((error: unknown) => {
+        sendResponse({
+          ok: false,
+          error: error instanceof Error ? error.message : "unknown_error",
+        });
+      });
+      return true;
+    }
+
     if (msg?.type === "get_active_tab_trust") {
       void getActiveTrustStatus()
         .then((trust) => sendResponse({ ok: true, payload: trust }))

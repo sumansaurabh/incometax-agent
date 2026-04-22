@@ -9,6 +9,7 @@ router = APIRouter(tags=["ws"])
 async def websocket_endpoint(websocket: WebSocket) -> None:
   access_token = websocket.query_params.get("access_token")
   device_id = websocket.query_params.get("device_id", "")
+  await websocket.accept()
   if not access_token:
     await websocket.close(code=4401, reason="authorization_required")
     return
@@ -17,8 +18,6 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
   except AuthError as exc:
     await websocket.close(code=4403 if exc.status_code == 403 else 4401, reason=exc.code)
     return
-
-    await websocket.accept()
   await websocket.send_json(
     {
       "type": "hello",
