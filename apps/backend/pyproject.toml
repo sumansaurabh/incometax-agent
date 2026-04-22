@@ -17,6 +17,9 @@ opentelemetry-api = "*"
 opentelemetry-exporter-otlp-proto-http = "*"
 redis = "^5.2.0"
 minio = "^7.2.0"
+pypdf = "^5.0.0"
+PyMuPDF = "^1.24.0"
+pillow = "^11.0.0"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]

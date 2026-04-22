@@ -9,6 +9,7 @@ ALIASES = {
     "broker_capital_gain": "broker_capgain",
     "form_16": "form16",
     "form_16a": "form16a",
+    "form_16b": "form16b",
     "salary-slip": "salary_slip",
     "interest-certificate": "interest_certificate",
     "home-loan-certificate": "home_loan_cert",
@@ -17,7 +18,7 @@ ALIASES = {
 
 def _detect_from_payload(payload: dict) -> tuple[str, float]:
     declared = str(payload.get("doc_type") or payload.get("document_type") or "").strip().lower().replace("-", "_")
-    if declared:
+    if declared and declared not in {"unknown", "auto", "detect"}:
         return ALIASES.get(declared, declared), 0.99
 
     file_name = str(payload.get("file_name") or "").lower()
@@ -28,9 +29,13 @@ def _detect_from_payload(payload: dict) -> tuple[str, float]:
         return "ais_json", 0.92
     if mime_type == "text/csv" or file_name.endswith(".csv"):
         return "ais_csv", 0.92
-    if "form 16a" in text:
+    if "form no. 16b" in text or "form no 16b" in text or "form 16b" in text or "section 194-ia" in text:
+        return "form16b", 0.92
+    if "form 16a" in text or "form no. 16a" in text or "form no 16a" in text:
         return "form16a", 0.94
-    if "form 16" in text:
+    if "form 16" in text or "form no. 16" in text or "form no 16" in text or (
+        "certificate under section 203" in text and "section 192" in text
+    ):
         return "form16", 0.94
     if "tax information statement" in text or "tis" in text:
         return "tis", 0.88

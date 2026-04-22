@@ -15,7 +15,19 @@ def _merge_dict(target: dict[str, Any], source: dict[str, Any]) -> dict[str, Any
 def _coerce_to_tax_facts(parsed_facts: dict[str, Any]) -> dict[str, Any]:
     tax_facts: dict[str, Any] = {}
 
-    for key in ("pan", "assessment_year", "name", "dob", "residential_status", "regime"):
+    for key in (
+        "pan",
+        "assessment_year",
+        "name",
+        "dob",
+        "residential_status",
+        "regime",
+        "gross_total_income",
+        "standard_deduction",
+        "taxable_income",
+        "rebate_87a",
+        "tax_payable",
+    ):
         value = parsed_facts.get(key)
         if value is not None:
             tax_facts[key] = value

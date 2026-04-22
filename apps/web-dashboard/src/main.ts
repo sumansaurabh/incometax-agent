@@ -460,13 +460,20 @@ async function searchDashboardDocuments(session: Session, threadId: string, quer
   });
 }
 
+async function reprocessDashboardDocument(session: Session, documentId: string): Promise<void> {
+  await apiRequest(session, `/api/documents/${encodeURIComponent(documentId)}/reprocess`, {
+    method: "POST",
+    body: JSON.stringify({ process_immediately: true }),
+  });
+}
+
 function renderDocumentList(documents: ThreadDocument[]): string {
   if (!documents.length) {
     return `<div class="empty">No documents uploaded for this thread yet.</div>`;
   }
   return `
     <table class="table compact">
-      <thead><tr><th>File</th><th>Type</th><th>Status</th><th>Version</th></tr></thead>
+      <thead><tr><th>File</th><th>Type</th><th>Status</th><th>Version</th><th>Action</th></tr></thead>
       <tbody>
         ${documents
           .map(
@@ -476,6 +483,7 @@ function renderDocumentList(documents: ThreadDocument[]): string {
                 <td>${escapeHtml(document.document_type)}</td>
                 <td><span class="pill ${document.status === "indexed" ? "low" : "medium"}">${escapeHtml(document.status)}</span></td>
                 <td>${escapeHtml(String(document.latest_version_no ?? 1))}</td>
+                <td><button type="button" class="secondary compact-button" data-reprocess-document="${escapeHtml(document.document_id)}">Reprocess</button></td>
               </tr>
             `,
           )
@@ -650,6 +658,22 @@ function wireDocumentActions(session: Session): void {
       setDocumentResults(renderDocumentSearch(await searchDashboardDocuments(session, threadId, query)));
     } catch (error) {
       setDocumentResults(`<p class="flash-error">${escapeHtml(error instanceof Error ? error.message : "Search failed.")}</p>`);
+    }
+  });
+
+  document.querySelector<HTMLDivElement>("#document-results")?.addEventListener("click", async (event) => {
+    const target = event.target instanceof HTMLElement ? event.target.closest<HTMLButtonElement>("[data-reprocess-document]") : null;
+    if (!target) return;
+    const threadId = currentDocumentThreadId();
+    const documentId = target.getAttribute("data-reprocess-document") || "";
+    if (!threadId || !documentId) return;
+    target.disabled = true;
+    target.textContent = "Reprocessing...";
+    try {
+      await reprocessDashboardDocument(session, documentId);
+      setDocumentResults(renderDocumentList(await listDashboardDocuments(session, threadId)));
+    } catch (error) {
+      setDocumentResults(`<p class="flash-error">${escapeHtml(error instanceof Error ? error.message : "Reprocess failed.")}</p>`);
     }
   });
 }

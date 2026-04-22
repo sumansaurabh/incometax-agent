@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import re
 import uuid
 from pathlib import Path
 from typing import Any, Optional
@@ -363,6 +364,62 @@ class DocumentService:
                 document_id,
             )
 
+    async def reprocess_document(self, *, document_id: str, process_immediately: bool = True) -> dict[str, Any]:
+        parsed_document_id = uuid.UUID(document_id)
+        pool = await get_pool()
+        async with pool.acquire() as connection:
+            row = await connection.fetchrow(
+                """
+                select d.id, d.thread_id, d.doc_type, dv.version_no, dv.storage_uri
+                from documents d
+                join document_versions dv on dv.document_id = d.id
+                where d.id = $1
+                order by dv.version_no desc
+                limit 1
+                """,
+                parsed_document_id,
+            )
+        if row is None:
+            raise KeyError(document_id)
+
+        async with pool.acquire() as connection:
+            await connection.execute(
+                """
+                update documents
+                set status = 'uploaded', updated_at = now()
+                where id = $1
+                """,
+                parsed_document_id,
+            )
+
+        job = await enqueue(
+            QueueJob(
+                document_id=document_id,
+                thread_id=row["thread_id"],
+                doc_type=row["doc_type"] or "unknown",
+                payload={
+                    "version_no": int(row["version_no"]),
+                    "storage_uri": row["storage_uri"],
+                    "sanitized": True,
+                    "virus_scan": "clean",
+                    "security": {"prompt_injection_risk": "low", "findings": []},
+                    "reprocess": True,
+                },
+            )
+        )
+        response: dict[str, Any] = {
+            "document_id": document_id,
+            "thread_id": row["thread_id"],
+            "version_no": int(row["version_no"]),
+            "status": "queued",
+            "job_id": job.job_id,
+        }
+        if process_immediately:
+            processed = await self.process_pending_jobs(limit=1, document_id=document_id)
+            if processed:
+                response.update(processed[0])
+        return response
+
     async def semantic_search(
         self,
         *,
@@ -445,30 +502,81 @@ class DocumentService:
         top_k: int,
         doc_types: Optional[list[str]],
     ) -> dict[str, Any]:
-        terms = [term for term in query.lower().split() if len(term) > 2]
+        stopwords = {
+            "what",
+            "which",
+            "where",
+            "when",
+            "who",
+            "how",
+            "the",
+            "and",
+            "for",
+            "with",
+            "from",
+            "this",
+            "that",
+            "tell",
+            "show",
+            "give",
+            "need",
+            "my",
+            "is",
+            "are",
+        }
+        terms = [term for term in re.findall(r"[a-z0-9_]+", query.lower()) if len(term) > 2 and term not in stopwords]
+        amount_pattern = re.compile(r"(?<![A-Z0-9])(?:Rs\.?\s*)?[0-9][0-9,]{2,}(?:\.[0-9]{1,2})?", re.IGNORECASE)
         pool = await get_pool()
         async with pool.acquire() as connection:
             rows = await connection.fetch(
                 """
-                select d.id, d.file_name, d.doc_type, dp.page_no, dp.text
-                from documents d
-                join document_pages dp on dp.document_id = d.id
-                where d.thread_id = $1
+                select d.id, d.file_name, d.doc_type, dc.page_number as page_no, dc.chunk_text as text
+                from document_chunks dc
+                join documents d on d.id = dc.document_id
+                where dc.thread_id = $1
                   and ($2::text[] is null or d.doc_type = any($2::text[]))
-                order by d.updated_at desc, dp.page_no asc
+                order by dc.created_at desc, dc.chunk_index asc
                 limit 200
                 """,
                 thread_id,
                 doc_types,
             )
+            if not rows:
+                rows = await connection.fetch(
+                    """
+                    select d.id, d.file_name, d.doc_type, dp.page_no, dp.text
+                    from documents d
+                    join document_pages dp on dp.document_id = d.id
+                    where d.thread_id = $1
+                      and ($2::text[] is null or d.doc_type = any($2::text[]))
+                    order by d.updated_at desc, dp.page_no asc
+                    limit 200
+                    """,
+                    thread_id,
+                    doc_types,
+                )
 
         scored: list[dict[str, Any]] = []
         for row in rows:
             text = str(row["text"] or "")
             lowered = text.lower()
-            score = sum(1 for term in terms if term in lowered) / max(len(terms), 1)
+            matched_terms = [term for term in terms if term in lowered]
+            score = len(matched_terms) / max(len(terms), 1)
             if score <= 0 and terms:
                 continue
+
+            occurrence_boost = sum(min(lowered.count(term), 5) for term in matched_terms) * 0.03
+            amount_near_term_boost = 0.0
+            for term in matched_terms:
+                term_index = lowered.find(term)
+                if term_index < 0:
+                    continue
+                window_start = max(0, term_index - 160)
+                window_end = min(len(text), term_index + 240)
+                if amount_pattern.search(text[window_start:window_end]):
+                    amount_near_term_boost = max(amount_near_term_boost, 0.35)
+            score += occurrence_boost + amount_near_term_boost
+
             snippet = text[:900]
             first_match = next((lowered.find(term) for term in terms if term in lowered), -1)
             if first_match > 120:
@@ -594,6 +702,12 @@ class DocumentService:
         processed = await process_document(payload)
         entities = processed.get("entities", [])
         normalized_fields = processed.get("normalized_fields", {})
+        try:
+            from itx_workers.pipelines.chunking import chunk_processed_document
+
+            chunks = chunk_processed_document(processed)
+        except Exception:
+            chunks = []
         extraction_confidence = float(
             processed.get("parsed", {}).get("confidence")
             or processed.get("classification_confidence")
@@ -619,6 +733,11 @@ class DocumentService:
                 )
                 await connection.execute(
                     "delete from document_entities where document_id = $1 and version_no = $2",
+                    parsed_document_id,
+                    version_no,
+                )
+                await connection.execute(
+                    "delete from document_chunks where document_id = $1 and version_no = $2",
                     parsed_document_id,
                     version_no,
                 )
@@ -716,6 +835,30 @@ class DocumentService:
                         entity.get("normalized") and str(entity.get("normalized")),
                         float(entity.get("confidence", 0) or 0),
                     )
+                for chunk in chunks:
+                    await connection.execute(
+                        """
+                        insert into document_chunks (
+                            id, document_id, thread_id, version_no, chunk_index, chunk_text,
+                            page_number, section_name, embedding_status
+                        )
+                        values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                        on conflict (document_id, version_no, chunk_index)
+                        do update set chunk_text = excluded.chunk_text,
+                                      page_number = excluded.page_number,
+                                      section_name = excluded.section_name,
+                                      embedding_status = excluded.embedding_status
+                        """,
+                        uuid.uuid4(),
+                        parsed_document_id,
+                        row["thread_id"],
+                        version_no,
+                        int(chunk.get("chunk_index", 0)),
+                        str(chunk.get("chunk_text") or ""),
+                        chunk.get("page_number"),
+                        chunk.get("section_name"),
+                        "pending",
+                    )
 
         embedding_index = {"status": "skipped", "reason": "embedding_stage_not_started", "chunk_count": 0}
         try:
@@ -731,6 +874,15 @@ class DocumentService:
                         where id = $1
                         """,
                         parsed_document_id,
+                    )
+                    await connection.execute(
+                        """
+                        update document_chunks
+                        set embedding_status = 'indexed'
+                        where document_id = $1 and version_no = $2
+                        """,
+                        parsed_document_id,
+                        version_no,
                     )
         except Exception as exc:  # Keep parsing useful even if embeddings are temporarily unavailable.
             embedding_index = {

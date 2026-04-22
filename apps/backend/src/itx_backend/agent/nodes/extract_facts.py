@@ -30,6 +30,12 @@ def _merge_tax_fact(
         target[key] = merged
         return
 
+    existing_value = target.get(key)
+    if value in (None, ""):
+        return
+    if isinstance(value, (int, float)) and float(value) == 0 and isinstance(existing_value, (int, float)) and float(existing_value) != 0:
+        return
+
     target[key] = value
     _set_nested_evidence(evidence, key_path, source_document, confidence)
 

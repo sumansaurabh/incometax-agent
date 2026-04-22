@@ -4,5 +4,8 @@ ENV PYTHONPATH=/app/apps/backend/src:/app/apps/workers/src
 ENV PYTHONUNBUFFERED=1
 COPY apps/backend /app/apps/backend
 COPY apps/workers /app/apps/workers
-RUN pip install --no-cache-dir pydantic asyncpg redis watchfiles minio
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends tesseract-ocr \
+  && rm -rf /var/lib/apt/lists/* \
+  && pip install --no-cache-dir pydantic asyncpg redis watchfiles minio pypdf PyMuPDF pillow
 CMD ["python", "-m", "itx_workers.dev_runner"]

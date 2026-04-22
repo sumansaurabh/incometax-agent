@@ -40,6 +40,10 @@ class QueueRunRequest(BaseModel):
     limit: int = 10
 
 
+class ReprocessRequest(BaseModel):
+    process_immediately: bool = True
+
+
 class DocumentSearchRequest(BaseModel):
     thread_id: str
     query: str
@@ -133,6 +137,18 @@ async def ingest_uploaded_document(document_id: str, payload: DocumentIngestRequ
         raise HTTPException(status_code=404, detail="document_not_found") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/{document_id}/reprocess")
+async def reprocess_document(document_id: str, payload: ReprocessRequest) -> dict:
+    await _require_document_access(document_id)
+    try:
+        return await document_service.reprocess_document(
+            document_id=document_id,
+            process_immediately=payload.process_immediately,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="document_not_found") from exc
 
 
 @router.post("/queue/run")

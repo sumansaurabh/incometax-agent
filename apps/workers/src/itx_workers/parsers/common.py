@@ -3,7 +3,10 @@ from __future__ import annotations
 import csv
 import io
 import json
+import os
 import re
+import subprocess
+import tempfile
 from typing import Any, Iterable, Optional
 
 
@@ -34,6 +37,141 @@ def decode_text_bytes(content: bytes) -> str:
         except UnicodeDecodeError:
             continue
     return content.decode("utf-8", errors="ignore")
+
+
+def is_meaningful_text(text: str) -> bool:
+    normalized = normalize_text(text)
+    if len(normalized) < 40:
+        return False
+    lower = normalized.lower()
+    pdf_artifact_terms = ("pdf-1.", "/xobject", "endstream", "xref", "obj", "decodeparms")
+    artifact_hits = sum(1 for term in pdf_artifact_terms if term in lower)
+    words = re.findall(r"[A-Za-z]{3,}", normalized)
+    if len(words) < 8:
+        return False
+    if artifact_hits >= 3 and len(words) < 80:
+        return False
+    return True
+
+
+def _run_tesseract(image_bytes: bytes) -> str:
+    language = os.getenv("ITX_OCR_LANGUAGE", "eng")
+    timeout = int(os.getenv("ITX_OCR_TIMEOUT_SECONDS", "45"))
+    with tempfile.NamedTemporaryFile(suffix=".png") as image_file:
+        try:
+            from PIL import Image
+
+            image = Image.open(io.BytesIO(image_bytes))
+            image.save(image_file.name, format="PNG")
+        except Exception:
+            image_file.write(image_bytes)
+            image_file.flush()
+
+        try:
+            result = subprocess.run(
+                ["tesseract", image_file.name, "stdout", "-l", language, "--psm", "6"],
+                text=True,
+                capture_output=True,
+                timeout=timeout,
+                check=False,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return ""
+    return normalize_text(result.stdout) if result.returncode == 0 else ""
+
+
+def extract_text_from_image_bytes(content: bytes) -> str:
+    return _run_tesseract(content)
+
+
+def _extract_pdf_pages_with_pypdf(content: bytes) -> list[dict[str, Any]]:
+    try:
+        from pypdf import PdfReader
+    except Exception:
+        return []
+
+    try:
+        reader = PdfReader(io.BytesIO(content))
+    except Exception:
+        return []
+
+    pages: list[dict[str, Any]] = []
+    for index, page in enumerate(reader.pages, start=1):
+        try:
+            text = normalize_text(page.extract_text() or "")
+        except Exception:
+            text = ""
+        pages.append(
+            {
+                "page_no": index,
+                "text": text,
+                "ocr_used": False,
+                "ocr_confidence": None,
+            }
+        )
+    return pages
+
+
+def _extract_pdf_pages_with_pymupdf(content: bytes, *, render_ocr: bool, prefer_ocr: bool = False) -> list[dict[str, Any]]:
+    try:
+        import fitz
+    except Exception:
+        return []
+
+    try:
+        document = fitz.open(stream=content, filetype="pdf")
+    except Exception:
+        return []
+
+    pages: list[dict[str, Any]] = []
+    for index, page in enumerate(document, start=1):
+        try:
+            native_text = normalize_text(page.get_text("text") or "")
+        except Exception:
+            native_text = ""
+        if (is_meaningful_text(native_text) and not prefer_ocr) or not render_ocr:
+            pages.append(
+                {
+                    "page_no": index,
+                    "text": native_text,
+                    "ocr_used": False,
+                    "ocr_confidence": None,
+                }
+            )
+            continue
+
+        ocr_text = ""
+        try:
+            pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+            ocr_text = _run_tesseract(pixmap.tobytes("png"))
+        except Exception:
+            ocr_text = ""
+        pages.append(
+            {
+                "page_no": index,
+                "text": ocr_text or native_text,
+                "ocr_used": bool(ocr_text),
+                "ocr_confidence": 0.68 if ocr_text else 0.0,
+            }
+        )
+    return pages
+
+
+def extract_pdf_pages_from_bytes(content: bytes, *, render_ocr: bool = True) -> list[dict[str, Any]]:
+    image_heavy = content.count(b"/Subtype/Image") > 0 or content.count(b"/Image") > 2
+    if render_ocr and image_heavy:
+        pages = _extract_pdf_pages_with_pymupdf(content, render_ocr=True, prefer_ocr=True)
+        if pages and any(is_meaningful_text(str(page.get("text") or "")) for page in pages):
+            return pages
+
+    pages = _extract_pdf_pages_with_pypdf(content)
+    if pages and any(is_meaningful_text(str(page.get("text") or "")) for page in pages):
+        return pages
+
+    pages = _extract_pdf_pages_with_pymupdf(content, render_ocr=render_ocr)
+    if pages and any(is_meaningful_text(str(page.get("text") or "")) for page in pages):
+        return pages
+    return []
 
 
 def _decode_pdf_literal(value: bytes) -> str:
@@ -74,6 +212,10 @@ def _decode_pdf_literal(value: bytes) -> str:
 
 
 def extract_text_from_pdf_bytes(content: bytes) -> str:
+    pages = extract_pdf_pages_from_bytes(content, render_ocr=True)
+    if pages:
+        return normalize_text("\n\n".join(str(page.get("text") or "") for page in pages if page.get("text")))
+
     streams = re.findall(rb"stream\r?\n(.*?)\r?\nendstream", content, re.DOTALL)
     if not streams:
         streams = [content]
@@ -94,13 +236,20 @@ def extract_text_from_pdf_bytes(content: bytes) -> str:
         return normalize_text("\n".join(chunks))
 
     decoded = decode_text_bytes(content)
-    return normalize_text("\n".join(re.findall(r"[A-Za-z0-9][A-Za-z0-9 ,.:;@#/()_\-]{4,}", decoded)))
+    fallback = normalize_text("\n".join(re.findall(r"[A-Za-z0-9][A-Za-z0-9 ,.:;@#/()_\-]{4,}", decoded)))
+    return fallback if is_meaningful_text(fallback) else ""
 
 
 def fallback_ocr_text(content: bytes) -> str:
+    if content.startswith(b"%PDF"):
+        return extract_text_from_pdf_bytes(content)
+    image_text = extract_text_from_image_bytes(content)
+    if image_text:
+        return image_text
     decoded = decode_text_bytes(content)
     chunks = re.findall(r"[A-Za-z0-9][A-Za-z0-9 ,.:;@#/()_\-]{3,}", decoded)
-    return normalize_text("\n".join(chunks))
+    fallback = normalize_text("\n".join(chunks))
+    return fallback if is_meaningful_text(fallback) else ""
 
 
 def parse_indian_amount(value: Any) -> Optional[float]:
@@ -168,6 +317,20 @@ def extract_labeled_amount(text: str, labels: Iterable[str]) -> Optional[float]:
             amount = parse_indian_amount(match.group(1))
             if amount is not None:
                 return amount
+    return None
+
+
+def extract_nearby_amount(text: str, labels: Iterable[str], *, window: int = 220, prefer: str = "last") -> Optional[float]:
+    amount_pattern = re.compile(r"(?<![A-Z0-9])([0-9][0-9,]{2,}(?:\.[0-9]{1,2})?|[0-9]\.[0-9]{1,2})")
+    for label in labels:
+        match = re.search(re.escape(label), text, re.IGNORECASE)
+        if not match:
+            continue
+        snippet = text[match.end() : match.end() + window]
+        amounts = [parse_indian_amount(value) for value in amount_pattern.findall(snippet)]
+        amounts = [amount for amount in amounts if amount is not None]
+        if amounts:
+            return amounts[0] if prefer == "first" else amounts[-1]
     return None
 
 
