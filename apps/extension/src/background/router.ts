@@ -11,6 +11,19 @@ type TrustStatus = {
   message: string;
 };
 
+function postRuntimeMessage(message: { type: string; payload?: unknown }): void {
+  chrome.runtime.sendMessage(message, () => {
+    const error = chrome.runtime.lastError;
+    if (!error) {
+      return;
+    }
+    if (error.message?.includes("Receiving end does not exist")) {
+      return;
+    }
+    console.warn("runtime message delivery failed", message.type, error.message);
+  });
+}
+
 function classifyTrust(url: string | undefined): TrustStatus {
   if (!url) {
     return {
@@ -35,13 +48,13 @@ function classifyTrust(url: string | undefined): TrustStatus {
     };
   }
   const host = parsed.host.toLowerCase();
-  if (host === "www.incometax.gov.in" || host === "incometax.gov.in") {
+  if (host === "incometax.gov.in" || host.endsWith(".incometax.gov.in")) {
     return {
       status: "verified",
       host,
       url,
       canOperate: true,
-      message: "Verified official e-Filing portal.",
+      message: "Verified official e-Filing portal domain.",
     };
   }
   if (host.includes("incometax") || host.includes("gov.in")) {
@@ -86,7 +99,7 @@ async function getTrustedActiveTabId(): Promise<number> {
 }
 
 async function emitActiveTrustStatus(): Promise<void> {
-  chrome.runtime.sendMessage({
+  postRuntimeMessage({
     type: "trust_status",
     payload: await getActiveTrustStatus(),
   });
@@ -111,7 +124,7 @@ export function initRouter(): void {
       return;
     }
 
-    chrome.runtime.sendMessage({
+    postRuntimeMessage({
       type: "backend_message",
       payload: message
     });
@@ -135,11 +148,11 @@ export function initRouter(): void {
 
     if (msg?.type === "page_detected") {
       const trust = classifyTrust(msg.payload?.url);
-      chrome.runtime.sendMessage({
+      postRuntimeMessage({
         type: "page_context",
         payload: msg.payload,
       });
-      chrome.runtime.sendMessage({ type: "trust_status", payload: trust });
+      postRuntimeMessage({ type: "trust_status", payload: trust });
     }
 
     if (msg?.type === "run_action_batch") {

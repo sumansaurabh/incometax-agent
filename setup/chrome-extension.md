@@ -10,9 +10,10 @@ This guide explains how to build and load the local Chrome extension.
 
 The extension already has host permissions for:
 
-1. `https://www.incometax.gov.in/*`
-2. `http://localhost:8000/*`
-3. `http://127.0.0.1:8000/*`
+1. `https://incometax.gov.in/*`
+2. `https://*.incometax.gov.in/*`
+3. `http://localhost:8000/*`
+4. `http://127.0.0.1:8000/*`
 
 The backend URL is hard-coded in the extension source today as `http://localhost:8000`, so run the backend on that port unless you also change the extension code.
 
@@ -69,5 +70,5 @@ There is no extra frontend env file for the extension right now. The only hard d
 ## Common local issues
 
 1. `authorization_required` or login failures usually mean the backend is not running on `localhost:8000`
-2. Empty side panel state usually means you are not on `https://www.incometax.gov.in/`
-3. If you rebuild the extension, click `Reload` on `chrome://extensions`
+2. Empty side panel state usually means you are not on an official `*.incometax.gov.in` portal page
+3. If you rebuild the extension, click `Reload` on `chrome://extensions` and then refresh the open portal tab so the new content script injects into that page

@@ -5,7 +5,8 @@
   "description": "AI copilot for Indian Income Tax e-Filing portal.",
   "permissions": ["storage", "scripting", "sidePanel", "tabs"],
   "host_permissions": [
-    "https://www.incometax.gov.in/*",
+    "https://incometax.gov.in/*",
+    "https://*.incometax.gov.in/*",
     "http://localhost:8000/*",
     "http://127.0.0.1:8000/*"
   ],
@@ -22,7 +23,7 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://www.incometax.gov.in/*"],
+      "matches": ["https://incometax.gov.in/*", "https://*.incometax.gov.in/*"],
       "js": ["src/content/index.ts"]
     }
   ]
