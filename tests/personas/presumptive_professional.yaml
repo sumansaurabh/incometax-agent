@@ -1,0 +1,7 @@
+persona: presumptive_professional
+profile:
+  resident: true
+income:
+  business_presumptive: 1800000
+flags:
+  presumptive_income: true

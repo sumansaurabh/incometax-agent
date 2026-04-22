@@ -21,6 +21,23 @@ def cap_80ttb(value: float) -> float:
     return min(max(value, 0.0), 50000.0)
 
 
+def cap_80e(value: float) -> float:
+    return max(value, 0.0)
+
+
+def cap_80ee(value: float) -> float:
+    return min(max(value, 0.0), 50000.0)
+
+
+def cap_80eea(value: float) -> float:
+    return min(max(value, 0.0), 150000.0)
+
+
+def cap_80gg(rent_paid: float, adjusted_total_income: float) -> float:
+    income = max(adjusted_total_income, 0.0)
+    return min(max(rent_paid - (0.10 * income), 0.0), 60000.0, 0.25 * income)
+
+
 def hra_exemption(hra_received: float, rent_paid: float, salary: float, metro: bool = False) -> float:
     actual_hra = max(hra_received, 0.0)
     rent_minus_ten_percent = max(rent_paid - (0.10 * max(salary, 0.0)), 0.0)

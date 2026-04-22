@@ -146,12 +146,12 @@ Verified in:
 Current state:
 
 - Rules coverage is no longer ITR-1-only.
-- The engine now includes residential-status classification, broader ITR eligibility helpers, richer schedule detection, disclosure checks, HRA treatment, and additional Chapter VI-A caps including 80G, 80TTA, and 80TTB.
+- The engine now includes residential-status classification, broader ITR eligibility helpers, richer schedule detection, disclosure checks, HRA treatment, and additional Chapter VI-A caps including 80G, 80TTA, 80TTB, 80E, 80EE, 80EEA, and 80GG.
 - The existing contract is preserved while returning a much richer rule-evaluation payload.
 
 Still missing or too thin:
 
-- More complete taxpayer coverage across complex capital gains, clubbing, foreign income, business books, MAT/AMT, and edge-case disclosures.
+- More complete taxpayer coverage across complex capital gains, clubbing, business books, MAT/AMT, and edge-case disclosures.
 - Deeper presumptive-tax and business-income reasoning beyond the current eligibility-level treatment.
 - More exhaustive deduction, exemption, and validation coverage tied to real filing edge cases.
 
@@ -166,17 +166,18 @@ Verified in:
 Current state:
 
 - Parser count is good for this stage.
-- Regression depth is not.
-- The fixture bank is still very small.
+- A real regression bank now exists for the parser path, with fixture-backed scorecard coverage across the currently implemented parsers.
+- The fixture bank is still synthetic and not yet representative of broad production document variation.
 
 Evidence:
 
-- Only four top-level personas are present today: `salaried_simple`, `salaried_multi_employer`, `capital_gains_lite`, and `mismatch_heavy`.
+- The repo now includes a parser regression bank at `tests/fixtures/synthetic_docs/parser_regression_cases.json` plus a reusable scorecard runner at `scripts/parser_scorecard.py`.
+- Eight top-level personas are present today: `salaried_simple`, `salaried_multi_employer`, `capital_gains_lite`, `mismatch_heavy`, `senior_citizen_interest`, `house_property_hra`, `presumptive_professional`, and `foreign_asset_review`.
 
 Why it matters:
 
-- There is no strong per-parser accuracy baseline.
-- It is hard to claim extraction quality with confidence.
+- There is now a real synthetic per-parser regression baseline.
+- It is still hard to claim production extraction quality with confidence because the case bank is synthetic and still narrow.
 - This is a direct blocker to calling the product production-ready.
 
 ### 4. Replay and analytics exist, but only as lightweight service layers
@@ -297,7 +298,7 @@ It is not market-complete for the broader Indian filing market because it still 
 
 1. Expand the current fixture-backed filing-path adapters into broader captured production portal coverage.
 2. Expand rules-core from the current broader baseline into real complex-taxpayer coverage.
-3. Build a real parser-regression fixture bank and extraction scorecards.
+3. Expand the new parser-regression bank from synthetic fixtures into broader production-like extraction scorecards.
 4. Turn durable replay and durable analytics into a real portal-regression and operations pipeline.
 5. Build a real CA dashboard on top of the existing APIs.
 6. Deepen consent policy granularity and operator review UX.

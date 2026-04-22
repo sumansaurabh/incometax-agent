@@ -46,3 +46,62 @@ class RulesEngineTest(unittest.TestCase):
         self.assertIn("Schedule CG", result["required_schedules"])
         self.assertIn("Schedule FA", result["required_schedules"])
         self.assertTrue(any("Foreign asset" in warning for warning in result["disclosure_checks"]))
+
+    def test_evaluate_extended_deductions_and_itr4_eligibility(self) -> None:
+        result = evaluate(
+            0.0,
+            0.0,
+            False,
+            48000.0,
+            52000.0,
+            total_income=2200000.0,
+            resident=True,
+            has_business_income=True,
+            presumptive_income=True,
+            senior_citizen=True,
+            senior_interest=70000.0,
+            education_loan_interest_80e=63000.0,
+            first_home_interest_80ee=90000.0,
+            affordable_home_interest_80eea=200000.0,
+            rent_paid_80gg=180000.0,
+            adjusted_total_income=720000.0,
+            income_heads=["business", "other_sources"],
+            has_tax_payments=True,
+            has_foreign_income=True,
+            is_director=True,
+            has_unlisted_equity=True,
+            agricultural_income=10000.0,
+        )
+
+        self.assertEqual(result["deductions"]["section_80ttb_applied"], 50000.0)
+        self.assertEqual(result["deductions"]["section_80e_applied"], 63000.0)
+        self.assertEqual(result["deductions"]["section_80ee_applied"], 50000.0)
+        self.assertEqual(result["deductions"]["section_80eea_applied"], 150000.0)
+        self.assertEqual(result["deductions"]["section_80gg_applied"], 60000.0)
+        self.assertFalse(result["eligibility"]["itr4"])
+        self.assertIn("Schedule BP", result["required_schedules"])
+        self.assertIn("Schedule TDS/TCS", result["required_schedules"])
+        self.assertIn("Schedule EI", result["required_schedules"])
+        self.assertTrue(any("Director details" in warning for warning in result["disclosure_checks"]))
+        self.assertTrue(any("Agricultural income" in warning for warning in result["disclosure_checks"]))
+
+    def test_evaluate_itr1_disqualification_for_foreign_assets_and_multiple_house_properties(self) -> None:
+        result = evaluate(
+            150000.0,
+            25000.0,
+            True,
+            15000.0,
+            20000.0,
+            total_income=480000.0,
+            resident=True,
+            has_capital_gains=False,
+            has_multiple_house_properties=True,
+            has_foreign_assets=True,
+            agricultural_income=12000.0,
+            income_heads=["salary", "house_property"],
+        )
+
+        self.assertFalse(result["eligibility"]["itr1"])
+        self.assertIn("Schedule FA", result["required_schedules"])
+        self.assertIn("Schedule EI", result["required_schedules"])
+        self.assertTrue(any("Foreign asset" in warning for warning in result["disclosure_checks"]))

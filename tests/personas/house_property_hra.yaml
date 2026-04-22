@@ -1,0 +1,11 @@
+persona: house_property_hra
+income:
+  salary: 1800000
+  house_property: -240000
+deductions:
+  section80C: 150000
+exemptions:
+  hra: 216000
+housing_loan:
+  interest: 240000
+  principal: 150000

@@ -1,6 +1,17 @@
 from typing import Any, Dict, List, Optional
 
-from rules_core.caps.chapter_vi_a import cap_80c, cap_80d, cap_80g, cap_80tta, cap_80ttb, hra_exemption
+from rules_core.caps.chapter_vi_a import (
+    cap_80c,
+    cap_80d,
+    cap_80e,
+    cap_80ee,
+    cap_80eea,
+    cap_80g,
+    cap_80gg,
+    cap_80tta,
+    cap_80ttb,
+    hra_exemption,
+)
 from rules_core.caps.standard_deduction import standard_deduction
 from rules_core.eligibility.itr1 import eligible as itr1_eligible
 from rules_core.eligibility.itr2 import eligible as itr2_eligible
@@ -45,6 +56,15 @@ def evaluate(
     liable_to_tax_elsewhere: bool = True,
     has_crypto_activity: bool = False,
     has_unreported_interest: bool = False,
+    education_loan_interest_80e: float = 0.0,
+    first_home_interest_80ee: float = 0.0,
+    affordable_home_interest_80eea: float = 0.0,
+    rent_paid_80gg: float = 0.0,
+    adjusted_total_income: float = 0.0,
+    agricultural_income: float = 0.0,
+    has_foreign_income: bool = False,
+    is_director: bool = False,
+    has_unlisted_equity: bool = False,
 ) -> Dict[str, Any]:
     inferred_income_heads = list(income_heads or [])
     if is_salary and "salary" not in inferred_income_heads:
@@ -69,6 +89,8 @@ def evaluate(
         }
     )
 
+    adjusted_total_income_base = adjusted_total_income if adjusted_total_income > 0.0 else total_income
+
     deductions = {
         "section_80c_applied": cap_80c(deductions_80c),
         "section_80d_applied": cap_80d(deductions_80d, senior_citizen=senior_citizen),
@@ -79,6 +101,10 @@ def evaluate(
         ),
         "section_80tta_applied": cap_80tta(savings_interest),
         "section_80ttb_applied": cap_80ttb(senior_interest),
+        "section_80e_applied": cap_80e(education_loan_interest_80e),
+        "section_80ee_applied": cap_80ee(first_home_interest_80ee),
+        "section_80eea_applied": cap_80eea(affordable_home_interest_80eea),
+        "section_80gg_applied": cap_80gg(rent_paid_80gg, adjusted_total_income_base) if rent_paid_80gg > 0.0 else 0.0,
         "hra_exemption_applied": hra_exemption(hra_received, rent_paid, basic_salary, metro=metro),
     }
     deductions_present = any(value > 0 for value in deductions.values())
@@ -91,7 +117,15 @@ def evaluate(
         "deductions": deductions,
         "residential_status": residential_status,
         "eligibility": {
-            "itr1": itr1_eligible(total_income, has_capital_gains, bool(residential_status["resident"])),
+            "itr1": itr1_eligible(
+                total_income,
+                has_capital_gains,
+                bool(residential_status["resident"]),
+                has_multiple_house_properties=has_multiple_house_properties,
+                has_foreign_assets=has_foreign_assets or has_foreign_income,
+                has_business_income=has_business_income,
+                agricultural_income=agricultural_income,
+            ),
             "itr2": itr2_eligible(
                 has_capital_gains,
                 no_business_income=not has_business_income,
@@ -99,6 +133,7 @@ def evaluate(
                 total_income=total_income,
                 has_multiple_house_properties=has_multiple_house_properties,
                 has_foreign_assets=has_foreign_assets,
+                has_unlisted_equity=has_unlisted_equity,
             ),
             "itr3": itr3_eligible(
                 has_business_income=has_business_income,
@@ -111,6 +146,7 @@ def evaluate(
                 resident=bool(residential_status["resident"]),
                 has_foreign_assets=has_foreign_assets,
                 turnover=total_income,
+                agricultural_income=agricultural_income,
             ),
         },
         "required_schedules": required_schedules(
@@ -119,11 +155,17 @@ def evaluate(
             has_foreign_assets=has_foreign_assets,
             has_tax_payments=has_tax_payments,
             has_deductions=deductions_present,
+            total_income=total_income,
+            has_exempt_income=agricultural_income > 0.0,
         ),
         "disclosure_checks": disclosure_checks(
             has_foreign_assets=has_foreign_assets,
             has_crypto_activity=has_crypto_activity,
             has_unreported_interest=has_unreported_interest,
             uses_presumptive_scheme=presumptive_income,
+            has_foreign_income=has_foreign_income,
+            is_director=is_director,
+            has_unlisted_equity=has_unlisted_equity,
+            agricultural_income=agricultural_income,
         ),
     }

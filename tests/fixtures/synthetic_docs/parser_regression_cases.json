@@ -1,0 +1,255 @@
+{
+  "cases": [
+    {
+      "case_id": "form16_basic",
+      "payload": {
+        "file_name": "form16.txt",
+        "mime_type": "text/plain",
+        "doc_type": "form16",
+        "raw_text": "Form 16\nEmployee Name: Alice Example\nPAN: ABCDE1234F\nEmployer Name: Example Technologies Pvt Ltd\nEmployer TAN: BLRA12345B\nAssessment Year: 2025-26\nGross Salary: 1850000\nTax deducted at source: 210000\n"
+      },
+      "expected": {
+        "document_type": "form16",
+        "parser": "form16",
+        "normalized_fields": {
+          "pan": "ABCDE1234F",
+          "assessment_year": "2025-26",
+          "salary.gross": 1850000.0,
+          "tax_paid.tds_salary": 210000.0,
+          "employer_name": "Example Technologies Pvt Ltd"
+        }
+      }
+    },
+    {
+      "case_id": "form16a_interest_tds",
+      "payload": {
+        "file_name": "form16a.txt",
+        "mime_type": "text/plain",
+        "doc_type": "form16a",
+        "raw_text": "Form 16A\nDeductee: Alice Example\nPAN: ABCDE1234F\nAssessment Year: 2025-26\nAmount paid / credited: 18500\nTax deducted: 1850\n"
+      },
+      "expected": {
+        "document_type": "form16a",
+        "parser": "form16a",
+        "normalized_fields": {
+          "pan": "ABCDE1234F",
+          "assessment_year": "2025-26",
+          "tax_paid.tds_other": 1850.0,
+          "other_sources.total": 18500.0,
+          "name": "Alice Example"
+        }
+      }
+    },
+    {
+      "case_id": "salary_slip_basic",
+      "payload": {
+        "file_name": "salary-slip.txt",
+        "mime_type": "text/plain",
+        "doc_type": "salary_slip",
+        "raw_text": "Salary Slip\nEmployee Name: Alice Example\nEmployer: Example Technologies Pvt Ltd\nGross Pay: 98000\n"
+      },
+      "expected": {
+        "document_type": "salary_slip",
+        "parser": "salary_slip",
+        "normalized_fields": {
+          "name": "Alice Example",
+          "salary.gross": 98000.0,
+          "employer_name": "Example Technologies Pvt Ltd"
+        }
+      }
+    },
+    {
+      "case_id": "interest_certificate_bank",
+      "payload": {
+        "file_name": "interest-certificate.txt",
+        "mime_type": "text/plain",
+        "doc_type": "interest_certificate",
+        "raw_text": "Interest Certificate\nPAN: ABCDE1234F\nBank Name: Example Bank\nIFSC: HDFC0001234\nInterest Paid: 12345\nTDS: 1234\n"
+      },
+      "expected": {
+        "document_type": "interest_certificate",
+        "parser": "interest_certificate",
+        "normalized_fields": {
+          "pan": "ABCDE1234F",
+          "other_sources.total": 12345.0,
+          "tax_paid.tds_other": 1234.0,
+          "bank.ifsc": "HDFC0001234",
+          "bank.name": "Example Bank"
+        }
+      }
+    },
+    {
+      "case_id": "health_insurance_80d",
+      "payload": {
+        "file_name": "health-insurance.txt",
+        "mime_type": "text/plain",
+        "doc_type": "health_insurance",
+        "raw_text": "Health Insurance Premium Certificate\nPolicy Holder: Alice Example\nSelf and Family Premium: 18000\nParents Premium: 32000\n"
+      },
+      "expected": {
+        "document_type": "health_insurance",
+        "parser": "health_insurance",
+        "normalized_fields": {
+          "name": "Alice Example",
+          "deductions.80d": 50000.0,
+          "deductions.80d_parents": 32000.0
+        }
+      }
+    },
+    {
+      "case_id": "rent_receipt_hra",
+      "payload": {
+        "file_name": "rent-receipt.txt",
+        "mime_type": "text/plain",
+        "doc_type": "rent_receipt",
+        "raw_text": "Rent Receipt\nTenant: Alice Example\nRent Paid: 216000\n"
+      },
+      "expected": {
+        "document_type": "rent_receipt",
+        "parser": "rent_receipt",
+        "normalized_fields": {
+          "name": "Alice Example",
+          "exemptions.hra": 216000.0
+        }
+      }
+    },
+    {
+      "case_id": "home_loan_certificate",
+      "payload": {
+        "file_name": "home-loan.txt",
+        "mime_type": "text/plain",
+        "doc_type": "home_loan_cert",
+        "raw_text": "Home Loan Interest Certificate\nInterest on Housing Loan: 240000\nPrincipal Repaid: 150000\n"
+      },
+      "expected": {
+        "document_type": "home_loan_cert",
+        "parser": "home_loan_cert",
+        "normalized_fields": {
+          "house_property.loan_interest": 240000.0,
+          "house_property.net": -240000.0,
+          "deductions.80c": 150000.0
+        }
+      }
+    },
+    {
+      "case_id": "elss_ppf_80c",
+      "payload": {
+        "file_name": "elss-ppf.txt",
+        "mime_type": "text/plain",
+        "doc_type": "elss_ppf",
+        "raw_text": "Investment Statement\nContribution: 150000\n"
+      },
+      "expected": {
+        "document_type": "elss_ppf",
+        "parser": "elss_ppf",
+        "normalized_fields": {
+          "deductions.80c": 150000.0
+        }
+      }
+    },
+    {
+      "case_id": "broker_capital_gains",
+      "payload": {
+        "file_name": "broker-capgain.txt",
+        "mime_type": "text/plain",
+        "doc_type": "broker_capgain",
+        "raw_text": "Capital Gains Statement\nShort Term Capital Gain: 12500\nLong Term Capital Gain: 45000\n"
+      },
+      "expected": {
+        "document_type": "broker_capgain",
+        "parser": "broker_capgain",
+        "normalized_fields": {
+          "capital_gains.stcg": 12500.0,
+          "capital_gains.ltcg": 45000.0
+        }
+      }
+    },
+    {
+      "case_id": "ais_pdf_overview",
+      "payload": {
+        "file_name": "ais-overview.txt",
+        "mime_type": "text/plain",
+        "doc_type": "ais_pdf",
+        "raw_text": "AIS Overview\nPAN: ABCDE1234F\nA.Y.: 2025-26\nGross Salary: 1200000\nTDS on Salary: 150000\nTDS on Other: 2500\nInterest Income: 12345\n"
+      },
+      "expected": {
+        "document_type": "ais_pdf",
+        "parser": "ais_pdf",
+        "normalized_fields": {
+          "pan": "ABCDE1234F",
+          "assessment_year": "2025-26",
+          "salary.gross": 1200000.0,
+          "tax_paid.tds_salary": 150000.0,
+          "tax_paid.tds_other": 2500.0,
+          "other_sources.total": 12345.0
+        }
+      }
+    },
+    {
+      "case_id": "ais_json_nested",
+      "payload": {
+        "file_name": "ais.json",
+        "mime_type": "application/json",
+        "doc_type": "ais_json",
+        "raw_text": "{\"pan\":\"ABCDE1234F\",\"fullName\":\"Alice Example\",\"assessmentYear\":\"2025-26\",\"grossSalary\":1200000,\"tdsSalary\":150000,\"otherSources\":12345,\"longTermCapitalGain\":55000,\"section80C\":150000,\"section80D\":25000,\"ifscCode\":\"HDFC0001234\",\"bankName\":\"Example Bank\"}"
+      },
+      "expected": {
+        "document_type": "ais_json",
+        "parser": "ais_json",
+        "normalized_fields": {
+          "pan": "ABCDE1234F",
+          "name": "Alice Example",
+          "assessment_year": "2025-26",
+          "salary.gross": 1200000.0,
+          "tax_paid.tds_salary": 150000.0,
+          "other_sources.total": 12345.0,
+          "capital_gains.ltcg": 55000.0,
+          "deductions.80c": 150000.0,
+          "deductions.80d": 25000.0,
+          "bank.ifsc": "HDFC0001234"
+        }
+      }
+    },
+    {
+      "case_id": "ais_csv_rows",
+      "payload": {
+        "file_name": "ais.csv",
+        "mime_type": "text/csv",
+        "doc_type": "ais_csv",
+        "raw_text": "section,amount\nsalary,1200000\n192,150000\n194A,2500\ndividend,12345\nltcg,55000\n"
+      },
+      "expected": {
+        "document_type": "ais_csv",
+        "parser": "ais_csv",
+        "normalized_fields": {
+          "salary.gross": 1200000.0,
+          "tax_paid.tds_salary": 150000.0,
+          "tax_paid.tds_other": 2500.0,
+          "other_sources.total": 12345.0,
+          "capital_gains.ltcg": 55000.0
+        }
+      }
+    },
+    {
+      "case_id": "tis_summary",
+      "payload": {
+        "file_name": "tis.txt",
+        "mime_type": "text/plain",
+        "doc_type": "tis",
+        "raw_text": "Taxpayer Information Summary\nPAN: ABCDE1234F\nA.Y.: 2025-26\nSalary Income: 1100000\nIncome from Other Sources: 14000\nSTCG: 10000\nLTCG: 30000\n"
+      },
+      "expected": {
+        "document_type": "tis",
+        "parser": "tis",
+        "normalized_fields": {
+          "pan": "ABCDE1234F",
+          "assessment_year": "2025-26",
+          "salary.gross": 1100000.0,
+          "other_sources.total": 14000.0,
+          "capital_gains.stcg": 10000.0,
+          "capital_gains.ltcg": 30000.0
+        }
+      }
+    }
+  ]
+}

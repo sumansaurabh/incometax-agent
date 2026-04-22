@@ -1,0 +1,11 @@
+persona: senior_citizen_interest
+profile:
+  age: 68
+  resident: true
+income:
+  pension: 540000
+  interest: 72000
+deductions:
+  section80D: 50000
+flags:
+  senior_citizen: true

@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List
 
 
 def required(
@@ -7,6 +7,8 @@ def required(
     has_foreign_assets: bool = False,
     has_tax_payments: bool = False,
     has_deductions: bool = False,
+    total_income: float = 0.0,
+    has_exempt_income: bool = False,
 ) -> List[str]:
     schedule = []
     normalized_heads = set(income_heads)
@@ -26,4 +28,8 @@ def required(
         schedule.append("Schedule TDS/TCS")
     if has_foreign_assets:
         schedule.append("Schedule FA")
-    return schedule
+    if has_exempt_income:
+        schedule.append("Schedule EI")
+    if total_income > 5000000.0:
+        schedule.append("Schedule AL")
+    return list(dict.fromkeys(schedule))

@@ -11,6 +11,7 @@ PAN_PATTERN = re.compile(r"\b[A-Z]{5}[0-9]{4}[A-Z]\b")
 TAN_PATTERN = re.compile(r"\b[A-Z]{4}[0-9]{5}[A-Z]\b")
 IFSC_PATTERN = re.compile(r"\b[A-Z]{4}0[A-Z0-9]{6}\b")
 AY_PATTERN = re.compile(r"A\.?Y\.?\s*[:\-]?\s*(\d{4})\s*[-–/]\s*(\d{2,4})", re.IGNORECASE)
+ASSESSMENT_YEAR_PATTERN = re.compile(r"Assessment\s+Year\s*[:\-]?\s*(\d{4})\s*[-–/]\s*(\d{2,4})", re.IGNORECASE)
 
 
 def normalize_text(raw_text: str) -> str:
@@ -146,6 +147,8 @@ def extract_ifsc(text: str) -> Optional[str]:
 
 def extract_assessment_year(text: str) -> Optional[str]:
     match = AY_PATTERN.search(text)
+    if not match:
+        match = ASSESSMENT_YEAR_PATTERN.search(text)
     if not match:
         return None
     start_year, end_year = match.groups()

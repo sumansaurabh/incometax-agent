@@ -1,0 +1,10 @@
+persona: foreign_asset_review
+profile:
+  resident: false
+income:
+  salary: 1400000
+  capital_gains: 250000
+flags:
+  has_foreign_assets: true
+  has_foreign_income: true
+  is_director: true
