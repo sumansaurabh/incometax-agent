@@ -3,6 +3,8 @@ import { readField } from "./actions/read";
 import { detectPage } from "./page-detector";
 
 const LAUNCHER_ID = "itx-sidepanel-launcher";
+const LAUNCHER_BASE_TRANSFORM = "translateY(-50%)";
+const LAUNCHER_ACTIVE_TRANSFORM = "translateY(-50%) translateX(-6px)";
 
 function ensureLauncherButton(): void {
   const existing = document.getElementById(LAUNCHER_ID);
@@ -12,6 +14,8 @@ function ensureLauncherButton(): void {
 
   const button = document.createElement("button");
   const icon = document.createElement("img");
+  const iconFrame = document.createElement("span");
+  const label = document.createElement("span");
   button.id = LAUNCHER_ID;
   button.type = "button";
   button.setAttribute("aria-label", "Open IncomeTax Agent");
@@ -19,32 +23,79 @@ function ensureLauncherButton(): void {
   icon.src = chrome.runtime.getURL("public/icons/icon48.png");
   icon.alt = "";
   icon.setAttribute("aria-hidden", "true");
+  label.textContent = "IncomeTax Agent";
   Object.assign(button.style, {
     position: "fixed",
     top: "50%",
-    right: "18px",
-    width: "58px",
-    height: "58px",
-    borderRadius: "18px",
+    right: "0",
+    width: "46px",
+    minHeight: "148px",
+    borderRadius: "18px 0 0 18px",
     border: "1px solid rgba(18, 59, 143, 0.16)",
-    background: "rgba(255, 255, 255, 0.96)",
-    boxShadow: "0 18px 36px rgba(15, 23, 42, 0.18)",
+    borderRight: "none",
+    background: "linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(238, 244, 255, 0.96) 100%)",
+    boxShadow: "0 16px 34px rgba(15, 23, 42, 0.16)",
     cursor: "pointer",
     zIndex: "2147483647",
-    padding: "0",
+    padding: "12px 6px 14px",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "12px",
+    transform: LAUNCHER_BASE_TRANSFORM,
+    transition: "transform 160ms ease, box-shadow 160ms ease, background 160ms ease",
+    backdropFilter: "blur(12px)",
+  } satisfies Partial<CSSStyleDeclaration>);
+  Object.assign(iconFrame.style, {
+    width: "30px",
+    height: "30px",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    transform: "translateY(-50%)",
-    backdropFilter: "blur(10px)",
+    borderRadius: "10px",
+    background: "linear-gradient(135deg, #123b8f 0%, #1b61d1 100%)",
+    boxShadow: "0 8px 18px rgba(18, 59, 143, 0.24)",
+    flexShrink: "0",
   } satisfies Partial<CSSStyleDeclaration>);
   Object.assign(icon.style, {
-    width: "32px",
-    height: "32px",
+    width: "18px",
+    height: "18px",
     display: "block",
   } satisfies Partial<CSSStyleDeclaration>);
+  Object.assign(label.style, {
+    writingMode: "vertical-rl",
+    transform: "rotate(180deg)",
+    color: "#123b8f",
+    fontSize: "11px",
+    fontWeight: "700",
+    letterSpacing: "0.08em",
+    lineHeight: "1",
+    textTransform: "uppercase",
+    fontFamily: '"Avenir Next", "Helvetica Neue", sans-serif',
+    userSelect: "none",
+  } satisfies Partial<CSSStyleDeclaration>);
 
-  button.appendChild(icon);
+  const activateLauncher = () => {
+    button.style.transform = LAUNCHER_ACTIVE_TRANSFORM;
+    button.style.boxShadow = "0 20px 40px rgba(15, 23, 42, 0.22)";
+    button.style.background = "linear-gradient(180deg, rgba(255, 255, 255, 1) 0%, rgba(226, 237, 255, 0.98) 100%)";
+  };
+
+  const deactivateLauncher = () => {
+    button.style.transform = LAUNCHER_BASE_TRANSFORM;
+    button.style.boxShadow = "0 16px 34px rgba(15, 23, 42, 0.16)";
+    button.style.background = "linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(238, 244, 255, 0.96) 100%)";
+  };
+
+  button.addEventListener("mouseenter", activateLauncher);
+  button.addEventListener("mouseleave", deactivateLauncher);
+  button.addEventListener("focus", activateLauncher);
+  button.addEventListener("blur", deactivateLauncher);
+
+  iconFrame.appendChild(icon);
+  button.appendChild(iconFrame);
+  button.appendChild(label);
 
   button.addEventListener("click", () => {
     chrome.runtime.sendMessage({ type: "open_side_panel", payload: {} }, () => {
