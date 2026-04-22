@@ -61,6 +61,15 @@ class Settings(BaseModel):
     agent_max_steps: int = int(os.getenv("ITX_AGENT_MAX_STEPS", "6"))
     agent_max_output_tokens: int = int(os.getenv("ITX_AGENT_MAX_OUTPUT_TOKENS", "1024"))
     agent_request_timeout_seconds: int = int(os.getenv("ITX_AGENT_REQUEST_TIMEOUT_SECONDS", "60"))
+    cohere_api_key: str = os.getenv("ITX_COHERE_API_KEY", os.getenv("COHERE_API_KEY", ""))
+    cohere_base_url: str = os.getenv("ITX_COHERE_BASE_URL", "https://api.cohere.com/v1")
+    cohere_rerank_model: str = os.getenv("ITX_COHERE_RERANK_MODEL", "rerank-english-v3.0")
+    retriever_dense_top_k: int = int(os.getenv("ITX_RETRIEVER_DENSE_TOP_K", "30"))
+    retriever_bm25_top_k: int = int(os.getenv("ITX_RETRIEVER_BM25_TOP_K", "30"))
+    retriever_fuse_top_k: int = int(os.getenv("ITX_RETRIEVER_FUSE_TOP_K", "20"))
+    retriever_rrf_k: int = int(os.getenv("ITX_RETRIEVER_RRF_K", "60"))
+    retriever_final_top_k: int = int(os.getenv("ITX_RETRIEVER_FINAL_TOP_K", "5"))
+    retriever_rerank_enabled: bool = _env_bool("ITX_RETRIEVER_RERANK_ENABLED", True)
     allowed_origins_csv: str = os.getenv("ITX_ALLOWED_ORIGINS", "http://localhost:4173,http://localhost:5173")
 
 
