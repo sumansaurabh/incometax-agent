@@ -7,6 +7,8 @@ from typing import Any
 
 from itx_backend.config import settings
 from itx_backend.db.session import get_pool
+from itx_backend.services.runtime_cache import runtime_cache
+from itx_backend.telemetry.tracing import get_trace_status
 
 
 class StartupHealthService:
@@ -31,6 +33,8 @@ class StartupHealthService:
             await self._check_database(),
             await self._check_document_storage(),
             self._check_configuration(),
+            await self._check_runtime_cache(),
+            self._check_observability(),
         ]
         status = "ok" if all(check["status"] == "ok" for check in checks) else "degraded"
         snapshot = {
@@ -100,6 +104,39 @@ class StartupHealthService:
             "name": "configuration",
             "status": "ok" if not issues else "failed",
             "detail": "configuration validated" if not issues else "; ".join(issues),
+        }
+
+    async def _check_runtime_cache(self) -> dict[str, Any]:
+        result = await runtime_cache.ping()
+        return {
+            "name": "runtime_cache",
+            "status": result["status"],
+            "detail": f"{result['detail']} backend={result['backend']}",
+        }
+
+    def _check_observability(self) -> dict[str, Any]:
+        issues: list[str] = []
+        if settings.langfuse_enabled:
+            if not settings.langfuse_public_key or not settings.langfuse_secret_key:
+                issues.append("langfuse public/secret keys are required when ITX_LANGFUSE_ENABLED is true")
+            if not (settings.langfuse_otlp_endpoint or settings.otel_exporter_otlp_endpoint):
+                issues.append("langfuse OTLP endpoint is required when ITX_LANGFUSE_ENABLED is true")
+        if settings.ai_provider and not settings.ai_api_key:
+            issues.append("ITX_AI_API_KEY is required when ITX_AI_PROVIDER is set")
+
+        trace_status = get_trace_status()
+        detail_parts = [
+            f"trace_backend={trace_status.get('backend', 'fallback')}",
+            f"trace_exporter={trace_status.get('exporter', 'none')}",
+            f"ai_provider={settings.ai_provider or 'not_configured'}",
+            f"langfuse={'enabled' if settings.langfuse_enabled else 'disabled'}",
+        ]
+        if settings.ai_model:
+            detail_parts.append(f"ai_model={settings.ai_model}")
+        return {
+            "name": "observability",
+            "status": "ok" if not issues else "failed",
+            "detail": "; ".join(detail_parts + issues),
         }
 
 

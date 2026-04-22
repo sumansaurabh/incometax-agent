@@ -103,6 +103,7 @@ export const pageCatalog: StaticAdapterDefinition[] = [
   {
     key: "other-sources",
     keywords: ["other sources", "interest income", "dividend income"],
+    domSignatures: ["input[name='savings_interest']", "input[name='fd_interest']", "input[name='dividend_income']"],
     textClues: ["savings interest", "dividend income", "other income"],
     schema: schema([
       ["savings_interest", "Savings Interest", false, "#savingsInterest, input[name='savings_interest']"],
@@ -114,6 +115,7 @@ export const pageCatalog: StaticAdapterDefinition[] = [
   {
     key: "house-property",
     keywords: ["house property", "schedule hp", "rental income"],
+    domSignatures: ["select[name='property_type']", "input[name='rental_income']", "input[name='home_loan_interest']"],
     textClues: ["municipal taxes", "interest on borrowed capital", "annual value"],
     schema: schema([
       ["property_type", "Property Type", true, "select[name='property_type'], #propertyType", ["self occupied", "let out"]],
@@ -126,6 +128,7 @@ export const pageCatalog: StaticAdapterDefinition[] = [
   {
     key: "capital-gains",
     keywords: ["capital gains", "schedule cg", "stcg", "ltcg"],
+    domSignatures: ["input[name='stcg_listed_equity']", "input[name='ltcg_listed_equity']", "input[name='sale_date']"],
     textClues: ["full value of consideration", "cost of acquisition", "112a", "111a"],
     schema: schema([
       ["stcg_listed_equity", "STCG on Listed Equity", false, "#stcgEquity, input[name='stcg_listed_equity']"],
@@ -183,6 +186,7 @@ export const pageCatalog: StaticAdapterDefinition[] = [
   {
     key: "refund-status",
     keywords: ["refund status", "demand and refund status", "know your refund", "refund banker", "refund reissue"],
+    domSignatures: ["[data-testid='refundStatus']", "[data-testid='refundAmount']", "[data-testid='refundReference']"],
     schema: schema([
       ["refund_status", "Refund Status", true, "#refundStatus, [data-testid='refundStatus'], [name='refundStatus'], [data-field='refund_status']"],
       ["refund_amount", "Refund Amount", false, "#refundAmount, [data-testid='refundAmount'], [name='refundAmount'], [data-field='refund_amount']"],

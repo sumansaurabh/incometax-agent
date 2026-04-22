@@ -5,10 +5,14 @@ def required(
     income_heads: List[str],
     has_business_income: bool = False,
     has_foreign_assets: bool = False,
+    has_foreign_income: bool = False,
+    has_foreign_tax_credit: bool = False,
     has_tax_payments: bool = False,
     has_deductions: bool = False,
     total_income: float = 0.0,
     has_exempt_income: bool = False,
+    has_clubbing_income: bool = False,
+    has_brought_forward_losses: bool = False,
 ) -> List[str]:
     schedule = []
     normalized_heads = set(income_heads)
@@ -28,8 +32,16 @@ def required(
         schedule.append("Schedule TDS/TCS")
     if has_foreign_assets:
         schedule.append("Schedule FA")
+    if has_foreign_income or has_foreign_tax_credit:
+        schedule.append("Schedule FSI")
+    if has_foreign_tax_credit:
+        schedule.append("Schedule TR")
     if has_exempt_income:
         schedule.append("Schedule EI")
+    if has_clubbing_income:
+        schedule.append("Schedule SPI")
+    if has_brought_forward_losses:
+        schedule.append("Schedule CFL")
     if total_income > 5000000.0:
         schedule.append("Schedule AL")
     return list(dict.fromkeys(schedule))

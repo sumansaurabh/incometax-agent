@@ -838,7 +838,7 @@ export default function App(): JSX.Element {
     if (!session) {
       return;
     }
-    if (!ensureConsentPurposes(["submit_return"], "E-verification approval preparation")) {
+    if (!ensureConsentPurposes(["submit_return", "everify_portal_handoff"], "E-verification approval preparation")) {
       return;
     }
     if (supportAssessment && !supportAssessment.can_submit) {
@@ -862,7 +862,7 @@ export default function App(): JSX.Element {
     if (!session) {
       return;
     }
-    if (!ensureConsentPurposes(["submit_return"], "E-verification handoff")) {
+    if (!ensureConsentPurposes(["submit_return", "everify_portal_handoff"], "E-verification handoff")) {
       return;
     }
     if (supportAssessment && !supportAssessment.can_submit) {
@@ -899,7 +899,7 @@ export default function App(): JSX.Element {
     if (!session || !everification?.handoff_id) {
       return;
     }
-    if (!ensureConsentPurposes(["submit_return"], "E-verification completion")) {
+    if (!ensureConsentPurposes(["submit_return", "everify_portal_handoff"], "E-verification completion")) {
       return;
     }
 
@@ -1205,7 +1205,7 @@ export default function App(): JSX.Element {
     if (!session) {
       return;
     }
-    if (!ensureConsentPurposes(["share_with_reviewer"], "Reviewer or CA handoff preparation")) {
+    if (!ensureConsentPurposes(["share_with_reviewer", "share_review_summary", "share_supporting_documents"], "Reviewer or CA handoff preparation")) {
       return;
     }
     setIsBusy(true);
@@ -1224,7 +1224,7 @@ export default function App(): JSX.Element {
     if (!session) {
       return;
     }
-    if (!ensureConsentPurposes(["share_with_reviewer"], "Reviewer sign-off request")) {
+    if (!ensureConsentPurposes(["share_with_reviewer", "share_review_summary"], "Reviewer sign-off request")) {
       return;
     }
     if (!reviewerEmail.trim()) {

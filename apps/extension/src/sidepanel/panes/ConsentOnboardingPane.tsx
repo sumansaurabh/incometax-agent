@@ -4,9 +4,21 @@ type ConsentCatalogItem = {
   purpose: string;
   title: string;
   required: boolean;
+  category?: string;
+  depends_on?: string[];
   description: string;
   consent_text: string;
+  scope?: Record<string, unknown>;
 };
+
+function formatScope(scope?: Record<string, unknown>): string {
+  if (!scope) {
+    return "";
+  }
+  return Object.entries(scope)
+    .map(([key, value]) => `${key}: ${JSON.stringify(value)}`)
+    .join(" / ");
+}
 
 type Props = {
   items: ConsentCatalogItem[];
@@ -54,7 +66,10 @@ export function ConsentOnboardingPane({
                 />
                 {item.title} {item.required ? "(required)" : "(optional)"}
               </label>
+              {item.category ? <p>Category: {item.category}</p> : null}
+              {item.depends_on?.length ? <p>Depends on: {item.depends_on.join(", ")}</p> : null}
               <p>{item.description}</p>
+              {item.scope ? <p>Scope: {formatScope(item.scope)}</p> : null}
               <p>{active ? "Already granted for this thread." : item.consent_text}</p>
             </li>
           );

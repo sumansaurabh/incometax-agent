@@ -4,15 +4,20 @@ def checks(
     has_unreported_interest: bool = False,
     uses_presumptive_scheme: bool = False,
     has_foreign_income: bool = False,
+    has_foreign_tax_credit: bool = False,
     is_director: bool = False,
     has_unlisted_equity: bool = False,
     agricultural_income: float = 0.0,
+    has_clubbing_income: bool = False,
+    has_brought_forward_losses: bool = False,
 ) -> list[str]:
     warnings = []
     if has_foreign_assets:
         warnings.append("Foreign asset disclosure required")
     if has_foreign_income:
         warnings.append("Foreign income disclosure should be reviewed before filing")
+    if has_foreign_tax_credit:
+        warnings.append("Foreign tax credit claims require FSI/TR schedules and source-country support")
     if has_crypto_activity:
         warnings.append("Virtual digital asset disclosure required")
     if has_unreported_interest:
@@ -25,4 +30,8 @@ def checks(
         warnings.append("Unlisted equity holdings must be disclosed in the return")
     if agricultural_income > 5000.0:
         warnings.append("Agricultural income above 5,000 should be disclosed for rate purposes")
+    if has_clubbing_income:
+        warnings.append("Clubbing income disclosures should be reviewed for spouse or minor income")
+    if has_brought_forward_losses:
+        warnings.append("Brought-forward loss set-off should be validated against prior-year schedules")
     return warnings

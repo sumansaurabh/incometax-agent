@@ -4,6 +4,8 @@ from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel
 
 from itx_backend.security.request_auth import get_request_auth
+from itx_backend.services.consent import missing_purposes
+from itx_backend.services.filing_runtime import filing_runtime
 from itx_backend.services.action_runtime import action_runtime
 from itx_backend.services.review_workspace import assess_agent_state, review_workspace
 
@@ -48,6 +50,13 @@ async def _require_accessible_state(thread_id: str):
         raise HTTPException(status_code=404, detail="thread_not_found") from exc
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail="thread_forbidden") from exc
+
+
+async def _require_consents(thread_id: str, purposes: list[str]) -> None:
+    consents = await filing_runtime.list_consents(thread_id)
+    missing = missing_purposes(consents, purposes)
+    if missing:
+        raise HTTPException(status_code=409, detail=f"missing_consent_purposes:{','.join(missing)}")
 
 
 @router.get("/clients")
@@ -121,6 +130,7 @@ async def client_support(thread_id: str) -> dict:
 @router.get("/client/{thread_id}/export")
 async def download_client_export(thread_id: str) -> Response:
     auth = get_request_auth(required=True)
+    await _require_consents(thread_id, ["share_with_reviewer", "export_filing_bundle"])
     try:
         content, filename = await review_workspace.build_client_export_bundle(
             thread_id=thread_id,
@@ -164,6 +174,7 @@ async def download_bulk_export(payload: BulkExportRequest) -> Response:
 async def prepare_handoff(payload: PrepareHandoffRequest) -> dict:
     auth = get_request_auth(required=True)
     await _require_accessible_state(payload.thread_id)
+    await _require_consents(payload.thread_id, ["share_with_reviewer", "share_review_summary", "share_supporting_documents"])
     try:
         return await review_workspace.prepare_handoff(
             thread_id=payload.thread_id,
@@ -206,6 +217,7 @@ async def signoffs(thread_id: str) -> dict:
 async def request_reviewer_signoff(payload: ReviewerSignoffRequest) -> dict:
     auth = get_request_auth(required=True)
     state, access_role = await _require_accessible_state(payload.thread_id)
+    await _require_consents(payload.thread_id, ["share_with_reviewer", "share_review_summary"])
     if access_role != "owner" or state.user_id != auth.user_id:
         raise HTTPException(status_code=403, detail="reviewer_signoff_owner_required")
     try:

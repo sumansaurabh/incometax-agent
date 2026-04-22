@@ -63,8 +63,11 @@ def evaluate(
     adjusted_total_income: float = 0.0,
     agricultural_income: float = 0.0,
     has_foreign_income: bool = False,
+    has_foreign_tax_credit: bool = False,
     is_director: bool = False,
     has_unlisted_equity: bool = False,
+    has_clubbing_income: bool = False,
+    has_brought_forward_losses: bool = False,
 ) -> Dict[str, Any]:
     inferred_income_heads = list(income_heads or [])
     if is_salary and "salary" not in inferred_income_heads:
@@ -153,10 +156,14 @@ def evaluate(
             inferred_income_heads,
             has_business_income=has_business_income,
             has_foreign_assets=has_foreign_assets,
+            has_foreign_income=has_foreign_income,
+            has_foreign_tax_credit=has_foreign_tax_credit,
             has_tax_payments=has_tax_payments,
             has_deductions=deductions_present,
             total_income=total_income,
             has_exempt_income=agricultural_income > 0.0,
+            has_clubbing_income=has_clubbing_income,
+            has_brought_forward_losses=has_brought_forward_losses,
         ),
         "disclosure_checks": disclosure_checks(
             has_foreign_assets=has_foreign_assets,
@@ -164,8 +171,11 @@ def evaluate(
             has_unreported_interest=has_unreported_interest,
             uses_presumptive_scheme=presumptive_income,
             has_foreign_income=has_foreign_income,
+            has_foreign_tax_credit=has_foreign_tax_credit,
             is_director=is_director,
             has_unlisted_equity=has_unlisted_equity,
             agricultural_income=agricultural_income,
+            has_clubbing_income=has_clubbing_income,
+            has_brought_forward_losses=has_brought_forward_losses,
         ),
     }

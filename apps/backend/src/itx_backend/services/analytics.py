@@ -6,7 +6,13 @@ import json
 from typing import Any, Optional
 
 from itx_backend.db.session import get_pool
+from itx_backend.services.portal_drift_autopilot import portal_drift_autopilot
+from itx_backend.services.replay_harness import replay_harness
+from itx_backend.services.startup_health import startup_health_service
+from itx_backend.telemetry.agent_observability import agent_observability
+from itx_backend.telemetry.drift import get_drift_telemetry
 from itx_backend.telemetry.metrics import metrics
+from itx_backend.telemetry.tracing import get_trace_status
 
 
 @dataclass
@@ -68,6 +74,17 @@ class AnalyticsService:
                 order by event_type asc
                 """
             )
+            recent_rows = await connection.fetch(
+                """
+                select to_char(ts::date, 'YYYY-MM-DD') as bucket, count(*) as count
+                from analytics_events
+                where ts >= now() - interval '14 days'
+                group by ts::date
+                order by bucket asc
+                """
+            )
+        drift_stats = get_drift_telemetry().get_statistics()
+        drift_recommendations = portal_drift_autopilot.run(get_drift_telemetry().export_for_training())
         return {
             "totals": {
                 "events": int(totals["events"] if totals else 0),
@@ -75,7 +92,16 @@ class AnalyticsService:
             },
             "by_stage": {row["stage"]: int(row["count"]) for row in by_stage_rows},
             "by_type": {row["event_type"]: int(row["count"]) for row in by_type_rows},
+            "daily_activity": {row["bucket"]: int(row["count"]) for row in recent_rows},
             "metrics": metrics.snapshot(),
+            "operations": {
+                "replay": await replay_harness.dashboard(),
+                "drift": drift_stats,
+                "drift_recommendations": drift_recommendations,
+                "agent_observability": await agent_observability.summary(),
+                "runtime_health": startup_health_service.latest(),
+                "tracing": get_trace_status(),
+            },
         }
 
     async def timeline(self, thread_id: str) -> list[dict[str, Any]]:
@@ -104,6 +130,9 @@ class AnalyticsService:
         pool = await get_pool()
         async with pool.acquire() as connection:
             await connection.execute("delete from analytics_events where thread_id = $1", thread_id)
+
+    async def agent_events(self, *, thread_id: Optional[str] = None, limit: int = 50) -> list[dict[str, Any]]:
+        return await agent_observability.recent_events(thread_id=thread_id, limit=limit)
 
 
 analytics_service = AnalyticsService()

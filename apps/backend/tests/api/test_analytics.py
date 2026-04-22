@@ -5,10 +5,11 @@ import unittest
 
 from itx_backend.agent.checkpointer import checkpointer
 from itx_backend.agent.state import AgentState
-from itx_backend.api.analytics import TrackEventRequest, dashboard, timeline, track
+from itx_backend.api.analytics import TrackEventRequest, agent_events, dashboard, timeline, track
 from itx_backend.db.session import close_connection_pool, get_pool, init_connection_pool
 from itx_backend.security.request_auth import reset_request_auth, set_request_auth
 from itx_backend.services.auth_runtime import AuthContext
+from itx_backend.telemetry.agent_observability import agent_observability
 
 
 @unittest.skipUnless(os.getenv("ITX_DATABASE_URL"), "ITX_DATABASE_URL required for Postgres tests")
@@ -67,9 +68,17 @@ class AnalyticsApiTest(unittest.IsolatedAsyncioTestCase):
                 payload={"version": 1},
             )
         )
+        await agent_observability.record(
+            thread_id="thread-analytics-1",
+            node_name="submission_summary",
+            status="completed",
+            duration_ms=14,
+            current_page="summary-review",
+        )
 
         timeline_items = await timeline("thread-analytics-1")
         dashboard_items = await dashboard()
+        agent_items = await agent_events(thread_id="thread-analytics-1")
 
         self.assertEqual(len(timeline_items["items"]), 2)
         self.assertEqual(timeline_items["items"][0]["event_type"], "thread_started")
@@ -78,3 +87,6 @@ class AnalyticsApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(dashboard_items["by_stage"]["bootstrap"], 1)
         self.assertEqual(dashboard_items["by_stage"]["submission"], 1)
         self.assertEqual(dashboard_items["by_type"]["summary_generated"], 1)
+        self.assertIn("operations", dashboard_items)
+        self.assertIn("replay", dashboard_items["operations"])
+        self.assertGreaterEqual(len(agent_items["items"]), 1)

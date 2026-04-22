@@ -9,6 +9,9 @@ type ValidationHelpItem = {
   question: string;
   severity: string;
   suggested_value?: string | null;
+  recovery_mode?: string;
+  recovery_actions?: string[];
+  page_drift_count?: number;
 };
 
 type RegimePreview = {
@@ -93,6 +96,15 @@ export function DetectedDetailsPane({
             {validationHelp.map((item, idx) => (
               <li key={`${item.field}-${idx}`}>
                 <strong>{item.field_label}:</strong> {item.plain_english} {item.suggested_fix}
+                {item.recovery_mode ? <p>Recovery mode: {item.recovery_mode}</p> : null}
+                {item.page_drift_count ? <p>Known drift events on this page: {item.page_drift_count}</p> : null}
+                {item.recovery_actions?.length ? (
+                  <ul>
+                    {item.recovery_actions.map((action) => (
+                      <li key={action}>{action}</li>
+                    ))}
+                  </ul>
+                ) : null}
               </li>
             ))}
           </ul>

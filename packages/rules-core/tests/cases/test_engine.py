@@ -105,3 +105,28 @@ class RulesEngineTest(unittest.TestCase):
         self.assertIn("Schedule FA", result["required_schedules"])
         self.assertIn("Schedule EI", result["required_schedules"])
         self.assertTrue(any("Foreign asset" in warning for warning in result["disclosure_checks"]))
+
+    def test_evaluate_complex_taxpayer_schedule_and_disclosure_set(self) -> None:
+        result = evaluate(
+            150000.0,
+            25000.0,
+            True,
+            110000.0,
+            118000.0,
+            total_income=3200000.0,
+            has_capital_gains=True,
+            has_foreign_income=True,
+            has_foreign_tax_credit=True,
+            has_clubbing_income=True,
+            has_brought_forward_losses=True,
+            has_tax_payments=True,
+            income_heads=["salary", "capital_gains", "other_sources"],
+        )
+
+        self.assertIn("Schedule FSI", result["required_schedules"])
+        self.assertIn("Schedule TR", result["required_schedules"])
+        self.assertIn("Schedule SPI", result["required_schedules"])
+        self.assertIn("Schedule CFL", result["required_schedules"])
+        self.assertTrue(any("Foreign tax credit" in warning for warning in result["disclosure_checks"]))
+        self.assertTrue(any("Clubbing income" in warning for warning in result["disclosure_checks"]))
+        self.assertTrue(any("Brought-forward loss" in warning for warning in result["disclosure_checks"]))

@@ -66,10 +66,34 @@ const fixtureCases = [
     keys: ["section_80c", "section_80ccd_1b", "section_80d_self", "section_80g", "section_80tta"],
   },
   {
+    fixture: "other-sources",
+    url: "https://www.incometax.gov.in/iec/foportal/file-return/other-sources",
+    page: "other-sources",
+    keys: ["savings_interest", "fd_interest", "dividend_income", "other_income"],
+  },
+  {
+    fixture: "house-property",
+    url: "https://www.incometax.gov.in/iec/foportal/file-return/schedule-hp",
+    page: "house-property",
+    keys: ["property_type", "rental_income", "municipal_taxes", "home_loan_interest", "co_owner_details"],
+  },
+  {
+    fixture: "capital-gains",
+    url: "https://www.incometax.gov.in/iec/foportal/file-return/schedule-cg",
+    page: "capital-gains",
+    keys: ["stcg_listed_equity", "stcg_other_assets", "ltcg_listed_equity", "ltcg_other_assets", "sale_date", "acquisition_date"],
+  },
+  {
     fixture: "tax-paid",
     url: "https://www.incometax.gov.in/iec/foportal/file-return/tax-paid",
     page: "tax-paid",
     keys: ["tds_salary", "tds_other", "advance_tax", "self_assessment_tax"],
+  },
+  {
+    fixture: "regime-choice",
+    url: "https://www.incometax.gov.in/iec/foportal/file-return/regime-choice",
+    page: "regime-choice",
+    keys: ["regime"],
   },
   {
     fixture: "bank-account",
@@ -82,6 +106,12 @@ const fixtureCases = [
     url: "https://www.incometax.gov.in/iec/foportal/file-return/summary",
     page: "summary-review",
     keys: ["gross_total_income", "total_deductions", "taxable_income", "tax_result", "proceed_to_verify"],
+  },
+  {
+    fixture: "refund-status",
+    url: "https://www.incometax.gov.in/iec/foportal/services/refund-status",
+    page: "refund-status",
+    keys: ["refund_status", "refund_amount", "refund_reference", "issued_at", "processed_at", "refund_mode", "bank_account_masked"],
   },
   {
     fixture: "everify",

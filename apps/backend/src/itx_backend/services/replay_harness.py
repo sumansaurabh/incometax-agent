@@ -202,6 +202,70 @@ class ReplayHarness:
             for row in rows
         ]
 
+    async def dashboard(self) -> dict[str, Any]:
+        pool = await get_pool()
+        async with pool.acquire() as connection:
+            totals = await connection.fetchrow(
+                """
+                select
+                    (select count(*) from replay_snapshots) as snapshots,
+                    (select count(*) from replay_runs) as runs,
+                    (select count(*) from replay_runs where success = true) as successful_runs,
+                    (select count(*) from replay_runs where success = false) as failed_runs
+                """
+            )
+            page_rows = await connection.fetch(
+                """
+                select s.page_type,
+                       count(r.run_id) as runs,
+                       count(*) filter (where r.success = true) as successful_runs,
+                       count(*) filter (where r.success = false) as failed_runs
+                from replay_snapshots s
+                left join replay_runs r on r.snapshot_id = s.snapshot_id
+                group by s.page_type
+                order by s.page_type asc
+                """
+            )
+            mismatch_rows = await connection.fetch(
+                """
+                select mismatches::text as mismatches
+                from replay_runs
+                where success = false
+                order by executed_at desc
+                limit 50
+                """
+            )
+
+        failed_runs = int(totals["failed_runs"] if totals else 0)
+        total_runs = int(totals["runs"] if totals else 0)
+        selector_failures: dict[str, int] = {}
+        for row in mismatch_rows:
+            for mismatch in json.loads(row["mismatches"] or "[]"):
+                selector = str(mismatch.get("selector") or mismatch.get("reason") or "unknown")
+                selector_failures[selector] = selector_failures.get(selector, 0) + 1
+
+        return {
+            "totals": {
+                "snapshots": int(totals["snapshots"] if totals else 0),
+                "runs": total_runs,
+                "successful_runs": int(totals["successful_runs"] if totals else 0),
+                "failed_runs": failed_runs,
+                "success_rate": round(((total_runs - failed_runs) / total_runs) if total_runs else 1.0, 4),
+            },
+            "by_page": {
+                row["page_type"]: {
+                    "runs": int(row["runs"] or 0),
+                    "successful_runs": int(row["successful_runs"] or 0),
+                    "failed_runs": int(row["failed_runs"] or 0),
+                }
+                for row in page_rows
+            },
+            "top_selector_failures": [
+                {"selector": selector, "count": count}
+                for selector, count in sorted(selector_failures.items(), key=lambda item: (-item[1], item[0]))[:10]
+            ],
+        }
+
     async def purge_thread(self, thread_id: str) -> None:
         pool = await get_pool()
         async with pool.acquire() as connection:

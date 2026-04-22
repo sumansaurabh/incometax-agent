@@ -23,6 +23,7 @@ from itx_backend.api.ca_workspace import (
     reviewer_counter_consent,
     reviewer_decision,
 )
+from itx_backend.api.filing import ConsentGrantItem, ConsentGrantRequest, grant_consents
 from itx_backend.db.session import close_connection_pool, get_pool, init_connection_pool
 from itx_backend.security.request_auth import reset_request_auth, set_request_auth
 from itx_backend.services.auth_runtime import AuthContext
@@ -95,6 +96,16 @@ class ReviewerWorkflowApiTest(unittest.IsolatedAsyncioTestCase):
                     "employer_name": [{"document_type": "form16"}],
                     "employer_tan": [{"document_type": "form16"}],
                 },
+            )
+        )
+        await grant_consents(
+            ConsentGrantRequest(
+                thread_id=thread_id,
+                items=[
+                    ConsentGrantItem(purpose="share_with_reviewer"),
+                    ConsentGrantItem(purpose="share_review_summary"),
+                    ConsentGrantItem(purpose="share_supporting_documents"),
+                ],
             )
         )
 
@@ -198,6 +209,17 @@ class ReviewerWorkflowApiTest(unittest.IsolatedAsyncioTestCase):
             submission_status="submitted",
         )
         await checkpointer.save(state)
+        await grant_consents(
+            ConsentGrantRequest(
+                thread_id=thread_id,
+                items=[
+                    ConsentGrantItem(purpose="share_with_reviewer"),
+                    ConsentGrantItem(purpose="share_review_summary"),
+                    ConsentGrantItem(purpose="share_supporting_documents"),
+                    ConsentGrantItem(purpose="export_filing_bundle"),
+                ],
+            )
+        )
 
         await filing_runtime.archive_submission_artifacts(
             thread_id=thread_id,

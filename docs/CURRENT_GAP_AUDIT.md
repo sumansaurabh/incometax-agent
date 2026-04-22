@@ -125,7 +125,7 @@ Current state:
 
 - The central adapter catalog now defines non-empty schemas, selector hints, aliases, text clues, and DOM signatures for the core supported filing pages.
 - Adapter detection now uses thresholded weighted keyword, DOM-signature, text-clue, and resolved-selector scoring instead of first-match title or URL detection.
-- Fixture-backed DOM tests now cover the core filing path: login, dashboard, file-return start, ITR selection, personal info, salary schedule, deductions, tax paid, bank account, summary review, and e-verify.
+- Fixture-backed DOM tests now cover the core filing path plus additional production-like pages: other sources, house property, capital gains, regime choice, refund status, and e-verify.
 - Coverage is still too narrow for the full e-Filing surface, and drift recovery is still basic outside the core filing path.
 
 Why it matters:
@@ -193,14 +193,16 @@ Current state:
 
 - Replay snapshots and runs are now persisted in Postgres and covered by a backend API test.
 - Analytics event timelines and dashboard totals are now persisted in Postgres and covered by a backend API test.
+- Analytics dashboards now also surface replay success, drift telemetry, runtime health, tracing configuration, and agent-node observability summaries.
+- Redis-backed runtime state now exists for rate limiting and agent-event buffering when configured, with in-memory fallback for local development.
 - Replay logic still only checks selector presence in captured HTML.
-- Analytics remain coarse-grained and mostly event-log oriented rather than full operator observability.
+- Analytics are better than before but still not a full operations pipeline with scheduled baselines, alerts, or historical investigation tooling.
 - Drift autopilot groups failures and returns recommendations, but it is not a true nightly regeneration pipeline.
 
 Why it matters:
 
 - Durable replay is now a real reliability primitive.
-- The operating model is still development-oriented because replay is not yet a full regression pipeline and analytics are still too shallow for production operations.
+- The operating model is materially better, but replay is not yet a full regression pipeline and the observability layer still needs alerting and longer-term operational workflows.
 
 ### 5. CA workspace is API-capable, but dashboard depth is not there yet
 
@@ -213,12 +215,13 @@ Verified in:
 Current state:
 
 - Backend APIs for client lists, client detail, handoffs, sign-offs, and exports exist.
-- The web dashboard surface is still minimal and not a full operations product.
+- The web dashboard now has a typed operational model for overview metrics, queues, replay/drift alerts, and per-client triage recommendations on top of the CA APIs.
+- It is still not a fully shipped multi-user operations UI.
 
 Why it matters:
 
 - The reviewer workflow is technically present.
-- The CA workspace is not yet a market-ready multi-client review product.
+- The CA workspace is more than API-only now, but it is still not yet a market-ready multi-client review product.
 
 ### 6. Consent handling is materially better, but policy depth is still limited
 
@@ -232,15 +235,16 @@ Verified in:
 
 Current state:
 
-- Purpose-specific onboarding consents now exist for upload, portal autofill, regime comparison, reviewer sharing, submission, and optional extended retention.
+- Purpose-specific onboarding consents now exist for upload, portal autofill, regime comparison, reviewer sharing, submission, optional extended retention, review-summary sharing, supporting-document sharing, export bundles, and e-verify handoff.
 - Sensitive actions are blocked until the required consent purposes are active.
+- Reviewer handoffs, reviewer sign-off requests, client exports, and e-verify workflow steps now have finer-grained consent gates instead of only broad top-level scopes.
 - Persisted consents are shown in the submission flow.
 - Consent revocation and purge are exposed in the UI.
 - Reviewer counter-consent exists.
 
 Still missing:
 
-- Consent versioning, richer scope granularity, and more explicit policy surfaces for reviewer-specific or artifact-specific sharing.
+- Consent versioning and legal/compliance-grade policy version surfaces.
 - More mature consent copy and compliance review for production deployment.
 
 ### 7. Operational hardening is still shallow
@@ -255,13 +259,15 @@ Current state:
 
 - CI is stricter than older audits implied: build, lint, typecheck, tests, compileall, and Python test suites are all present in one workflow.
 - Runtime startup now validates database connectivity, document storage writability, and configuration sanity.
-- The `/health` endpoint now exposes detailed check output.
-- Observability and runtime dependency checks are still shallow beyond those baseline checks.
+- The `/health` endpoint now exposes detailed check output including runtime cache and observability configuration status.
+- Langfuse-compatible OTLP tracing configuration, AI-provider configuration, and Redis runtime-cache readiness are now part of the runtime contract.
+- Agent-node execution telemetry now exists as a first-class observable stream.
+- Observability is still shallow beyond those foundations because alert delivery, long-term traces, and operator dashboards are not fully built out.
 
 Why it matters:
 
 - Build discipline is better than the stale docs suggested.
-- Production readiness is still not there because observability, alerting, external dependency coverage, and operational dashboards are shallow.
+- Production readiness is still not there because alerting, external dependency coverage, and fully operational dashboards are still shallow beyond the new baseline.
 
 ## Product And Market Verdict
 

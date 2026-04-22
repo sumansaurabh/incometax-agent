@@ -27,11 +27,12 @@ from itx_backend.security.request_auth import reset_request_auth, set_request_au
 from itx_backend.security.rate_limit import FixedWindowRateLimiter
 from itx_backend.services.auth_runtime import AuthError, auth_runtime
 from itx_backend.services.retention import retention_service
+from itx_backend.services.runtime_cache import runtime_cache
 from itx_backend.services.startup_health import startup_health_service
 from itx_backend.telemetry.tracing import setup_tracing
 
 
-limiter = FixedWindowRateLimiter(limit=500)
+limiter = FixedWindowRateLimiter(limit=500, window_seconds=settings.rate_limit_window_seconds)
 
 
 @asynccontextmanager
@@ -41,6 +42,7 @@ async def lifespan(_: FastAPI):
     try:
         yield
     finally:
+        await runtime_cache.close()
         await close_connection_pool()
 
 
@@ -51,7 +53,7 @@ def create_app() -> FastAPI:
     @app.middleware("http")
     async def request_guard(request: Request, call_next):
         key = request.client.host if request.client else "unknown"
-        if not limiter.allow(key):
+        if not await limiter.allow(key):
             return JSONResponse(content={"error": "rate_limited"}, status_code=429)
 
         anomalies = anomaly_detector.observe(

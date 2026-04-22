@@ -306,6 +306,8 @@ export type ConsentCatalogItem = {
   purpose: string;
   title: string;
   required: boolean;
+  category?: string;
+  depends_on?: string[];
   description: string;
   consent_text: string;
   scope: Record<string, unknown>;
@@ -321,6 +323,9 @@ export type ValidationHelpItem = {
   severity: string;
   suggested_value?: string | null;
   page_type: string;
+  recovery_mode?: string;
+  recovery_actions?: string[];
+  page_drift_count?: number;
 };
 
 export type RegimeProjection = {
