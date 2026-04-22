@@ -8,7 +8,11 @@
   "scripts": {
     "build": "echo 'portal-adapters build complete'",
     "lint": "echo 'lint placeholder for portal-adapters'",
-    "test": "echo 'test placeholder for portal-adapters'",
+    "test": "tsx --test tests/**/*.test.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "jsdom": "^26.1.0",
+    "tsx": "^4.20.0"
   }
 }

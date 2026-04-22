@@ -1,4 +1,4 @@
-import { createStaticAdapter, PageAdapter, scoreStaticAdapter } from "./base";
+import { createStaticAdapter, MIN_ADAPTER_SCORE, PageAdapter, scoreStaticAdapter } from "./base";
 import { pageCatalog } from "./catalog";
 
 const adapters: PageAdapter[] = pageCatalog.map((definition) => createStaticAdapter(definition));
@@ -15,7 +15,7 @@ export function detectAdapter(doc: Document): PageAdapter | null {
     }
   }
 
-  return bestScore > 0 ? bestAdapter : null;
+  return bestScore >= MIN_ADAPTER_SCORE ? bestAdapter : null;
 }
 
 export { adapters };

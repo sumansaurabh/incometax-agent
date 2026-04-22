@@ -123,15 +123,15 @@ Verified in:
 
 Current state:
 
-- The central adapter catalog now defines non-empty schemas, selector hints, aliases, and text clues for the core supported filing pages.
-- Adapter detection now uses weighted keyword, DOM-signature, text-clue, and resolved-selector scoring instead of first-match title or URL detection.
-- Selector inference is still heuristic and has not been validated against a broad real-portal fixture bank.
-- Coverage is still too narrow for the full e-Filing surface, and drift recovery is still basic.
+- The central adapter catalog now defines non-empty schemas, selector hints, aliases, text clues, and DOM signatures for the core supported filing pages.
+- Adapter detection now uses thresholded weighted keyword, DOM-signature, text-clue, and resolved-selector scoring instead of first-match title or URL detection.
+- Fixture-backed DOM tests now cover the core filing path: login, dashboard, file-return start, ITR selection, personal info, salary schedule, deductions, tax paid, bank account, summary review, and e-verify.
+- Coverage is still too narrow for the full e-Filing surface, and drift recovery is still basic outside the core filing path.
 
 Why it matters:
 
-- Core guided autofill is substantially less toy-like than before.
-- Broad autofill safety is still blocked by missing portal coverage and insufficient DOM-regression validation.
+- Core guided autofill for a simple filing path is materially more usable than before.
+- Broad autofill safety is still blocked by missing portal coverage beyond the main filing flow and by the lack of captured production DOM fixtures.
 - This remains one of the biggest reasons the product is not market-ready.
 
 ### 2. Rules coverage is still narrow
@@ -295,7 +295,7 @@ It is not market-complete for the broader Indian filing market because it still 
 
 ## Highest-Priority Pending Work
 
-1. Finish DOM-backed page adapters and confidence-based page detection.
+1. Expand the current fixture-backed filing-path adapters into broader captured production portal coverage.
 2. Expand rules-core from the current broader baseline into real complex-taxpayer coverage.
 3. Build a real parser-regression fixture bank and extraction scorecards.
 4. Turn durable replay and durable analytics into a real portal-regression and operations pipeline.

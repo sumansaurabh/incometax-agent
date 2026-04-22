@@ -26,6 +26,8 @@ export type StaticAdapterDefinition = {
   textClues?: string[];
 };
 
+export const MIN_ADAPTER_SCORE = 8;
+
 function normalize(value: string): string {
   return value
     .toLowerCase()
@@ -131,7 +133,7 @@ function inferSelectorFromLabels(doc: Document, candidates: string[]): string | 
       continue;
     }
 
-    if (node instanceof HTMLLabelElement) {
+    if (node.tagName.toLowerCase() === "label") {
       const htmlFor = node.getAttribute("for");
       if (htmlFor) {
         return `#${htmlFor}`;
@@ -198,7 +200,7 @@ function matchCount(value: string, patterns: string[]): number {
 function adapterScore(doc: Document, definition: StaticAdapterDefinition): number {
   const title = normalize(doc.title);
   const url = normalize(doc.location.href);
-  const body = normalize(doc.body?.innerText ?? "");
+  const body = normalize(doc.body?.innerText ?? doc.body?.textContent ?? "");
 
   let score = 0;
   score += matchCount(title, definition.keywords) * 5;
@@ -252,7 +254,7 @@ export function readDefaultValidation(doc: Document): ValidationError[] {
 export function createStaticAdapter(definition: StaticAdapterDefinition): PageAdapter {
   return {
     key: definition.key,
-    detect: (doc) => adapterScore(doc, definition) > 0,
+    detect: (doc) => adapterScore(doc, definition) >= MIN_ADAPTER_SCORE,
     getFormSchema: (doc) => resolveSchema(doc, definition),
     readValidation: (doc) => readDefaultValidation(doc),
   };
