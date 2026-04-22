@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import AsyncMock, patch
 
 from itx_backend.agent.checkpointer import checkpointer
 from itx_backend.agent.state import AgentState
@@ -102,6 +103,100 @@ class DocumentsApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(latest_state.tax_facts["pan"], "ABCDE1234F")
         self.assertEqual(latest_state.tax_facts["salary"]["gross"], 1850000.0)
         self.assertEqual(latest_state.tax_facts["tax_paid"]["tds_salary"], 210000.0)
+
+    async def test_signed_upload_returns_indexed_status_when_embedding_stage_succeeds(self) -> None:
+        self._bind_auth("user-1")
+        created = await signed_upload(
+            UploadInitRequest(
+                file_name="form16.txt",
+                mime_type="text/plain",
+                thread_id="thread-doc-1",
+                doc_type="form16",
+            )
+        )
+
+        with patch(
+            "itx_workers.pipelines.index_embeddings.index_document_embeddings",
+            new=AsyncMock(return_value={"status": "indexed", "chunk_count": 2, "model": "test-model", "dimensions": 8}),
+        ):
+            uploaded = await upload_document_content(
+                created["document_id"],
+                created["version_no"],
+                created["expires"],
+                created["signature"],
+                DocumentContentUploadRequest(
+                    thread_id="thread-doc-1",
+                    doc_type="form16",
+                    content_text=(
+                        "Form 16\n"
+                        "Employee Name: Alice Example\n"
+                        "PAN: ABCDE1234F\n"
+                        "Employer Name: Example Technologies Pvt Ltd\n"
+                        "Employer TAN: BLRA12345B\n"
+                        "Assessment Year: 2025-26\n"
+                        "Gross Salary: 1850000\n"
+                        "Tax deducted at source: 210000\n"
+                    ),
+                ),
+            )
+
+        documents = await list_thread_documents("thread-doc-1")
+
+        self.assertEqual(uploaded["status"], "indexed")
+        self.assertEqual(documents["documents"][0]["status"], "indexed")
+
+    async def test_list_documents_hides_stale_pending_upload_retries(self) -> None:
+        self._bind_auth("user-1")
+        first_attempt = await signed_upload(
+            UploadInitRequest(
+                file_name="retry-form16.txt",
+                mime_type="text/plain",
+                thread_id="thread-doc-1",
+                doc_type="form16",
+            )
+        )
+        second_attempt = await signed_upload(
+            UploadInitRequest(
+                file_name="retry-form16.txt",
+                mime_type="text/plain",
+                thread_id="thread-doc-1",
+                doc_type="form16",
+            )
+        )
+
+        pending_documents = await list_thread_documents("thread-doc-1")
+
+        self.assertEqual(len(pending_documents["documents"]), 1)
+        self.assertEqual(pending_documents["documents"][0]["document_id"], second_attempt["document_id"])
+        self.assertEqual(pending_documents["documents"][0]["status"], "pending_upload")
+
+        await upload_document_content(
+            second_attempt["document_id"],
+            second_attempt["version_no"],
+            second_attempt["expires"],
+            second_attempt["signature"],
+            DocumentContentUploadRequest(
+                thread_id="thread-doc-1",
+                doc_type="form16",
+                content_text=(
+                    "Form 16\n"
+                    "Employee Name: Alice Example\n"
+                    "PAN: ABCDE1234F\n"
+                    "Employer Name: Example Technologies Pvt Ltd\n"
+                    "Employer TAN: BLRA12345B\n"
+                    "Assessment Year: 2025-26\n"
+                    "Gross Salary: 1850000\n"
+                    "Tax deducted at source: 210000\n"
+                ),
+            ),
+        )
+
+        documents = await list_thread_documents("thread-doc-1")
+
+        self.assertEqual(first_attempt["document_id"] != second_attempt["document_id"], True)
+        self.assertEqual(len(documents["documents"]), 1)
+        self.assertEqual(documents["documents"][0]["document_id"], second_attempt["document_id"])
+        self.assertEqual(documents["documents"][0]["status"], "parsed")
 
     async def test_reupload_creates_new_version_and_reconciles_ais_vs_form16(self) -> None:
         self._bind_auth("user-1")

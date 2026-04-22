@@ -14,6 +14,136 @@ from itx_workers.parsers.common import (
 )
 
 
+IDENTITY_BLOCK_STOP_MARKERS = (
+    "PAN OF THE",
+    "THE COMMISSIONER",
+    "SUMMARY OF AMOUNT",
+    "ANNEXURE",
+    "RECEIPT NUMBERS",
+    "CERTIFICATE NUMBER",
+)
+
+NON_NAME_TOKENS = {
+    "APTUSDATALABS",
+    "BANGALORE",
+    "BUSINESSPARKS",
+    "DEPARTMENT",
+    "DIRECTOR",
+    "EMPLOYEE",
+    "EMPLOYER",
+    "GANJ",
+    "GOVERNMENT",
+    "HOBLI",
+    "INCOME",
+    "KARNATAKA",
+    "LIMITED",
+    "LUCKNOW",
+    "MAQBOOL",
+    "OFFICE",
+    "PARK",
+    "PLTD",
+    "PRIVATE",
+    "PRADESH",
+    "ROAD",
+    "SPECIFIED",
+    "TAX",
+    "TECHNOLOGIES",
+    "UTTAR",
+    "VILLAG",
+}
+
+
+def _normalize_line(value: str) -> str:
+    return re.sub(r"\s+", " ", value.replace("|", " ")).strip(" ,:-|")
+
+
+def _clean_identity_value(value: str | None, *, require_no_digits: bool = False) -> str | None:
+    if not value:
+        return None
+    candidate = _normalize_line(value)
+    if not candidate:
+        return None
+    upper = candidate.upper()
+    if any(
+        token in upper
+        for token in (
+            "NAME AND ADDRESS",
+            "PAN OF",
+            "TAN OF",
+            "ASSESSMENT YEAR",
+            "CERTIFICATE NO",
+            "INCOME TAX DEPARTMENT",
+        )
+    ):
+        return None
+    if "@" in candidate or candidate.startswith("+"):
+        return None
+    if require_no_digits and any(char.isdigit() for char in candidate):
+        return None
+    return candidate
+
+
+def _extract_identity_block(raw_text: str) -> list[str]:
+    lines = [_normalize_line(line) for line in raw_text.splitlines()]
+    for index, line in enumerate(lines):
+        upper = line.upper()
+        if "NAME AND ADDRESS OF THE EMPLOYER" not in upper or "EMPLOYEE" not in upper:
+            continue
+        block: list[str] = []
+        for candidate in lines[index + 1 :]:
+            if not candidate:
+                if block:
+                    break
+                continue
+            upper_candidate = candidate.upper()
+            if any(marker in upper_candidate for marker in IDENTITY_BLOCK_STOP_MARKERS):
+                break
+            block.append(candidate)
+            if len(block) >= 6:
+                break
+        return block
+    return []
+
+
+def _looks_like_person_name(value: str | None) -> bool:
+    candidate = _clean_identity_value(value, require_no_digits=True)
+    if not candidate:
+        return False
+    words = [word for word in candidate.replace(".", " ").split() if word]
+    if not 2 <= len(words) <= 5:
+        return False
+    upper_words = {word.upper().strip("-'") for word in words}
+    if upper_words & NON_NAME_TOKENS:
+        return False
+    return True
+
+
+def _extract_employee_name(raw_text: str) -> str | None:
+    labeled = _clean_identity_value(extract_labeled_text(raw_text, ["Employee Name", "Name of Employee"]), require_no_digits=True)
+    if _looks_like_person_name(labeled):
+        return labeled
+
+    block = _extract_identity_block(raw_text)
+    search_lines = block[2:] if len(block) >= 3 else block[1:]
+    for line in search_lines:
+        for part in reversed(line.split(",")):
+            candidate = _clean_identity_value(part, require_no_digits=True)
+            if _looks_like_person_name(candidate):
+                return candidate
+    return None
+
+
+def _extract_employer_name(raw_text: str) -> str | None:
+    labeled = _clean_identity_value(extract_labeled_text(raw_text, ["Employer Name"]))
+    if labeled:
+        return labeled
+
+    block = _extract_identity_block(raw_text)
+    if block:
+        return _clean_identity_value(block[0])
+    return None
+
+
 def _extract_employee_pan(raw_text: str) -> str | None:
     match = None
     for label in ("PAN of the Employee", "PAN of Employee", "Employee/Specified senior citizen"):
@@ -87,9 +217,9 @@ def parse(raw_text: str) -> dict:
     tax_payable = extract_nearby_amount(raw_text, ["Net tax payable", "Tax payable"], prefer="first")
     facts = {
         "pan": _extract_employee_pan(raw_text),
-        "name": extract_labeled_text(raw_text, ["Employee Name", "Name of Employee", "Name"]),
+        "name": _extract_employee_name(raw_text),
         "assessment_year": extract_assessment_year(raw_text),
-        "employer_name": extract_labeled_text(raw_text, ["Employer Name", "Name and address of the employer"]),
+        "employer_name": _extract_employer_name(raw_text),
         "employer_tan": extract_tan(raw_text),
         "salary": {"gross": gross or 0.0},
         "gross_total_income": gross_total_income or gross or 0.0,

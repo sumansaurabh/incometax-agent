@@ -222,19 +222,17 @@ class DocumentService:
                 sha256,
             )
 
-        job = await enqueue(
-            QueueJob(
-                document_id=document_id,
-                thread_id=effective_thread_id,
-                doc_type=effective_doc_type,
-                payload={
-                    "version_no": version_no,
-                    "storage_uri": storage_uri,
-                    "sanitized": sanitized,
-                    "virus_scan": virus_scan_status,
-                    "security": security,
-                },
-            )
+        job = QueueJob(
+            document_id=document_id,
+            thread_id=effective_thread_id,
+            doc_type=effective_doc_type,
+            payload={
+                "version_no": version_no,
+                "storage_uri": storage_uri,
+                "sanitized": sanitized,
+                "virus_scan": virus_scan_status,
+                "security": security,
+            },
         )
 
         response = {
@@ -242,16 +240,18 @@ class DocumentService:
             "version_no": version_no,
             "thread_id": effective_thread_id,
             "status": "queued",
-            "job_id": job.job_id,
+            "job_id": None,
             "storage_uri": storage_uri,
             "sanitized": sanitized,
             "virus_scan": virus_scan_status,
             "security": security,
         }
         if process_immediately:
-            processed = await self.process_pending_jobs(limit=1, document_id=document_id)
-            if processed:
-                response.update(processed[0])
+            response.update(await self._process_job(job))
+            return response
+
+        job = await enqueue(job)
+        response["job_id"] = job.job_id
         return response
 
     async def ingest_document(
@@ -354,7 +354,22 @@ class DocumentService:
                     "created_at": version_row["created_at"].isoformat() if version_row["created_at"] else None,
                 }
             )
-        return [self._serialize_document_row(row, versions_by_document.get(str(row["id"]), [])) for row in rows]
+
+        keys_with_materialized_upload = {
+            (str(row["thread_id"] or ""), str(row["file_name"] or ""))
+            for row in rows
+            if str(row["status"] or "") != "pending_upload"
+        }
+        seen_pending_keys: set[tuple[str, str]] = set()
+        serialized_rows: list[dict[str, Any]] = []
+        for row in rows:
+            document_key = (str(row["thread_id"] or ""), str(row["file_name"] or ""))
+            if str(row["status"] or "") == "pending_upload":
+                if document_key in keys_with_materialized_upload or document_key in seen_pending_keys:
+                    continue
+                seen_pending_keys.add(document_key)
+            serialized_rows.append(self._serialize_document_row(row, versions_by_document.get(str(row["id"]), [])))
+        return serialized_rows
 
     async def get_document_thread_id(self, document_id: str) -> Optional[str]:
         pool = await get_pool()
@@ -392,32 +407,32 @@ class DocumentService:
                 parsed_document_id,
             )
 
-        job = await enqueue(
-            QueueJob(
-                document_id=document_id,
-                thread_id=row["thread_id"],
-                doc_type=row["doc_type"] or "unknown",
-                payload={
-                    "version_no": int(row["version_no"]),
-                    "storage_uri": row["storage_uri"],
-                    "sanitized": True,
-                    "virus_scan": "clean",
-                    "security": {"prompt_injection_risk": "low", "findings": []},
-                    "reprocess": True,
-                },
-            )
+        job = QueueJob(
+            document_id=document_id,
+            thread_id=row["thread_id"],
+            doc_type=row["doc_type"] or "unknown",
+            payload={
+                "version_no": int(row["version_no"]),
+                "storage_uri": row["storage_uri"],
+                "sanitized": True,
+                "virus_scan": "clean",
+                "security": {"prompt_injection_risk": "low", "findings": []},
+                "reprocess": True,
+            },
         )
         response: dict[str, Any] = {
             "document_id": document_id,
             "thread_id": row["thread_id"],
             "version_no": int(row["version_no"]),
             "status": "queued",
-            "job_id": job.job_id,
+            "job_id": None,
         }
         if process_immediately:
-            processed = await self.process_pending_jobs(limit=1, document_id=document_id)
-            if processed:
-                response.update(processed[0])
+            response.update(await self._process_job(job))
+            return response
+
+        job = await enqueue(job)
+        response["job_id"] = job.job_id
         return response
 
     async def semantic_search(
@@ -914,10 +929,12 @@ class DocumentService:
         if row["thread_id"]:
             attached_summary = await self._attach_to_thread(str(row["thread_id"]), processed_document)
 
+        final_status = "indexed" if embedding_index.get("status") == "indexed" else "parsed"
+
         return {
             "document_id": str(row["id"]),
             "thread_id": row["thread_id"],
-            "status": "parsed",
+            "status": final_status,
             "document_type": processed_document["type"],
             "parser": processed_document["parser"],
             "classification_confidence": processed_document["classification_confidence"],

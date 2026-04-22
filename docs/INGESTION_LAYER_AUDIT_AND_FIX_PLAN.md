@@ -5,10 +5,12 @@ Scope: extension sidepanel, dashboard upload/search, backend document APIs, work
 
 ## Implementation Status After This Pass
 
-- The two uploaded PDFs in thread `8e04f368-5227-4106-8026-697770c87b7a` now reprocess as `form16`.
-- Form 16 Part A contributes salary TDS `82768.00`; Form 16 Part B contributes gross salary `730907.00`, standard deduction `75000.00`, taxable income `655907.00`, rebate `17796.00`, PAN `GWPPS0879L`, and employer TAN `BLRA20443D`.
+- The two uploaded PDFs in thread `8e04f368-5227-4106-8026-697770c87b7a` were revalidated directly against the live backend pipeline and restored into the local thread after validation.
+- Form 16 Part A now contributes employee name `AKANSHA SINHA`, employer `APTUSDATALABS TECHNOLOGIES PRIVATE LIMITED`, and salary TDS `82768.00`; Form 16 Part B contributes PAN `GWPPS0879L`, gross salary `730907.00`, standard deduction `75000.00`, taxable income `655907.00`, rebate `17796.00`, and employer TAN `BLRA20443D`.
 - Postgres now stores durable document chunks in `document_chunks`; search uses those chunks before falling back to page text.
 - Search for `what is my salary` now returns the Form 16 Part B salary chunk first through `lexical_fallback`.
+- `process_immediately=true` now executes inline in the backend instead of enqueueing and racing the background worker, so synchronous uploads/reprocess calls no longer unpredictably return `queued`.
+- Thread document lists now collapse stale duplicate `pending_upload` retries, so the dashboard does not show every abandoned retry row for the same file.
 - Qdrant/OpenAI embedding generation is still skipped in the current Docker runtime because `ITX_OPENAI_API_KEY` is empty. Once the key is configured, the same chunking path will index to Qdrant with `text-embedding-3-small`.
 
 ## 30 Things That Work Today
@@ -29,11 +31,11 @@ Scope: extension sidepanel, dashboard upload/search, backend document APIs, work
 14. Page text is stored in `document_pages`.
 15. Entities are stored in `document_entities`.
 16. Uploaded document versions are tracked in `document_versions`.
-17. `list_thread_documents` returns thread-level document status for dashboard and sidepanel.
+17. `list_thread_documents` returns thread-level document status for dashboard and sidepanel and collapses stale duplicate pending retries per file.
 18. The agent state can attach processed documents to a thread checkpoint.
 19. The extract-facts node can merge normalized fields into canonical tax facts.
 20. Fill-plan generation already maps `gross_salary`, employer details, PAN, deductions, tax-paid fields, bank fields, and regime choice into portal selectors.
-21. The dashboard shows uploaded files, type, status, and latest version.
+21. The dashboard shows uploaded files, type, status, latest version, and avoids duplicate stale pending rows for the same file.
 22. The sidepanel shows document cards after upload.
 23. Qdrant is present in Docker Compose and health-checked.
 24. MinIO is present in Docker Compose and health-checked.
@@ -42,7 +44,7 @@ Scope: extension sidepanel, dashboard upload/search, backend document APIs, work
 27. The search endpoint has a lexical fallback.
 28. The embedding health endpoint reports whether OpenAI, Qdrant, and storage are configured.
 29. Backend auth protects document upload, list, search, and reprocess APIs.
-30. The app can parse the two sample PDFs enough to classify them as Form 16 once real text extraction is available.
+30. The app now parses the two sample PDFs end to end into searchable Form 16 facts with employee name, employer name, salary, and TDS merged into thread tax facts.
 
 ## 30 Things That Break Or Are Incomplete
 
@@ -58,12 +60,12 @@ Scope: extension sidepanel, dashboard upload/search, backend document APIs, work
 10. Search fallback only searched page text; it did not have a durable chunk table.
 11. Chunk metadata was not persisted in Postgres.
 12. Re-indexing uploaded documents required manual queue/database intervention.
-13. The dashboard did not expose a reprocess action.
-14. The extension did not clearly distinguish `parsed` from `indexed`.
+13. The sidepanel still has no explicit reprocess action for a low-quality or failed document.
+14. The extension and dashboard still do not explain why a document is `parsed` instead of `indexed` when embeddings are skipped.
 15. Form 16 Part A and Part B uploaded separately can overwrite useful non-zero facts with zero facts.
 16. Form 16 parser labels were too narrow for TRACES/CPC OCR text.
 17. Form 16 parser could confuse section numbers, row numbers, or tax formula numbers for amounts.
-18. Employee PAN extraction could return deductor PAN instead of employee PAN.
+18. OCR on Form 16 Part A can still miss the employee PAN, so the merged identity for these files still depends on Part B for PAN.
 19. Form 16B was not recognized.
 20. Image file OCR was effectively a byte-decoding fallback, not real OCR.
 21. Docker images did not include Tesseract OCR.
@@ -72,10 +74,16 @@ Scope: extension sidepanel, dashboard upload/search, backend document APIs, work
 24. Large multi-page scanned PDFs had no page-level OCR loop.
 25. Parser confidence and extraction confidence were not surfaced enough in UI.
 26. The ingestion pipeline was too synchronous for large files when `process_immediately=true`.
-27. Pending upload rows remain after failed uploads and clutter the dashboard.
+27. Failed upload attempts can still leave stale rows in the database, although thread document lists now collapse duplicate pending retries in the UI.
 28. Qdrant point count is not shown next to document rows.
 29. Agent chat does not yet automatically call document search before answering every tax question.
 30. The current first-form filing flow still depends on extracted facts matching portal field mappings and portal selectors.
+
+## Validation Notes
+
+- Direct live validation was run against the two PDFs in `/Users/sumansaurabh/Downloads/income-tax-form` inside the Docker backend container.
+- Focused automated checks now cover realistic Form 16 identity extraction, indexed-status propagation, and stale pending-upload filtering.
+- Running backend document API tests against the shared local Postgres instance truncates `documents` and `agent_checkpoints`; if local manual uploads matter, restore or isolate the database before test runs.
 
 ## Use Cases Covered By The Fixed Ingestion Layer
 

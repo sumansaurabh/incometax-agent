@@ -1102,8 +1102,10 @@ function readFileAsBase64(file: File): Promise<string> {
 
 export function inferDocumentType(fileName: string): string {
   const normalized = fileName.toLowerCase();
-  if (normalized.includes("form16a")) return "form16a";
-  if (normalized.includes("form16") || normalized.includes("form-16")) return "form16";
+  const compact = normalized.replace(/[^a-z0-9]/g, "");
+  if (compact.includes("form16b")) return "form16b";
+  if (compact.includes("form16a")) return "form16a";
+  if (compact.includes("form16")) return "form16";
   if (normalized.includes("ais")) return normalized.endsWith(".json") ? "ais_json" : "ais_csv";
   if (normalized.includes("tis")) return "tis";
   if (normalized.includes("bank")) return "bank_statement";

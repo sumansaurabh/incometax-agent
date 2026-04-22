@@ -31,6 +31,36 @@ def _make_pdf(text: str) -> bytes:
 
 
 class DocumentPipelineTest(unittest.IsolatedAsyncioTestCase):
+    async def test_form16_realistic_layout_extracts_employee_and_employer_identity(self) -> None:
+        payload = {
+            "file_name": "form16-part-a.txt",
+            "mime_type": "text/plain",
+            "doc_type": "form16",
+            "raw_text": (
+                "FORM NO. 16\n"
+                "PARTA\n"
+                "Name and address of the Employer/Specified Bank Name and address of the Employee/Specified senior citizen\n"
+                "APTUSDATALABS TECHNOLOGIES PRIVATE LIMITED\n"
+                "SY NO.283/58/7, AURBIS BUSINESSPARKS PLTD.\n"
+                "DEVARABEESANAHALLI VILLAG, AKANSHA SINHA\n"
+                "VARTHUR HOBLI, BANGALORE - 560103 84/170, NEAR OLD RTO OFFICE, MAQBOOL GANJ, LUCKNOW -\n"
+                "Karnataka 226018 Uttar Pradesh\n"
+                "PAN of the Employee Reference No. provided by the\n"
+                "PAN of the Deductor TAN of the Deductor Employee/Specified senior citizen by the Employer\n"
+                "Summary of amount paid/credited and tax deducted at source thereon in respect of the employee\n"
+                "Qa FXDREWPT 730907.00 82768.00 82768.00\n"
+                "Certificate Number: VDMZRMA TAN of Employer: BLRA20443D PAN of Employee: GWPPS0879L Assessment Year: 2025-26\n"
+            ),
+        }
+
+        result = await process_document(payload)
+
+        self.assertEqual(result["document_type"], "form16")
+        self.assertEqual(result["normalized_fields"]["name"], "AKANSHA SINHA")
+        self.assertEqual(result["normalized_fields"]["employer_name"], "APTUSDATALABS TECHNOLOGIES PRIVATE LIMITED")
+        self.assertEqual(result["normalized_fields"]["employer_tan"], "BLRA20443D")
+        self.assertEqual(result["normalized_fields"]["tax_paid"]["tds_salary"], 82768.0)
+
     async def test_form16_pipeline_normalizes_salary_and_tds(self) -> None:
         payload = {
             "file_name": "form16.txt",
