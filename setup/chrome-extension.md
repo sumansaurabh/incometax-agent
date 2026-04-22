@@ -50,9 +50,9 @@ The extension is a Manifest V3 side panel app.
 
 Use it like this:
 
-1. Open `https://www.incometax.gov.in/`
-2. Click the extension icon in Chrome
-3. Open the side panel for `IncomeTax Agent`
+1. Open an official `https://*.incometax.gov.in/` portal page
+2. Click the `IncomeTax Agent` extension icon from the toolbar or extension menu
+3. The side panel opens on the right for the current portal tab
 
 If Chrome does not pin the action automatically, pin the extension from the toolbar first.
 

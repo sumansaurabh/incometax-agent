@@ -2,6 +2,7 @@ import { runApprovedActionBatch, snapshotPageContext } from "./action-runner";
 import { BackendConnector } from "./connector";
 
 const connector = new BackendConnector();
+const SIDEPANEL_PATH = "public/sidepanel.html";
 
 type TrustStatus = {
   status: "verified" | "lookalike" | "unsupported" | "missing";
@@ -89,6 +90,44 @@ async function getActiveTrustStatus(): Promise<TrustStatus> {
   return classifyTrust(activeTab?.url);
 }
 
+async function syncSidePanelForTab(tab: chrome.tabs.Tab | null | undefined): Promise<TrustStatus> {
+  const trust = classifyTrust(tab?.url);
+  if (!tab || typeof tab.id !== "number") {
+    return trust;
+  }
+  try {
+    await chrome.sidePanel.setOptions({
+      tabId: tab.id,
+      path: SIDEPANEL_PATH,
+      enabled: trust.canOperate,
+    });
+  } catch (error) {
+    console.warn("side panel tab sync failed", error);
+  }
+  return trust;
+}
+
+async function syncActiveSidePanel(): Promise<TrustStatus> {
+  const activeTab = await getActiveTab().catch(() => null);
+  return syncSidePanelForTab(activeTab);
+}
+
+async function configurePanelBehavior(): Promise<void> {
+  try {
+    await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+  } catch (error) {
+    console.warn("side panel behavior setup failed", error);
+  }
+}
+
+async function openSidePanelForTab(tab: chrome.tabs.Tab | null | undefined): Promise<void> {
+  const trust = await syncSidePanelForTab(tab);
+  if (!tab || typeof tab.id !== "number" || !trust.canOperate) {
+    throw new Error(trust.message);
+  }
+  await chrome.sidePanel.open({ tabId: tab.id });
+}
+
 async function getTrustedActiveTabId(): Promise<number> {
   const activeTab = await getActiveTab();
   const trust = classifyTrust(activeTab.url);
@@ -101,11 +140,12 @@ async function getTrustedActiveTabId(): Promise<number> {
 async function emitActiveTrustStatus(): Promise<void> {
   postRuntimeMessage({
     type: "trust_status",
-    payload: await getActiveTrustStatus(),
+    payload: await syncActiveSidePanel(),
   });
 }
 
 export function initRouter(): void {
+  void configurePanelBehavior();
   const forwardBackendMessage = (message: { type: string; payload?: unknown }) => {
     if (message.type === "run_actions") {
       void (async () => {
@@ -131,6 +171,25 @@ export function initRouter(): void {
   };
 
   void connector.connect(forwardBackendMessage);
+  void emitActiveTrustStatus();
+
+  chrome.runtime.onInstalled.addListener(() => {
+    void configurePanelBehavior();
+    void emitActiveTrustStatus();
+  });
+
+  chrome.runtime.onStartup.addListener(() => {
+    void configurePanelBehavior();
+    void emitActiveTrustStatus();
+  });
+
+  chrome.action.onClicked.addListener((tab) => {
+    void openSidePanelForTab(tab).catch((error: unknown) => {
+      const trust = classifyTrust(tab.url);
+      postRuntimeMessage({ type: "trust_status", payload: trust });
+      console.warn("side panel open failed", error instanceof Error ? error.message : error);
+    });
+  });
 
   chrome.tabs.onActivated.addListener(() => {
     void emitActiveTrustStatus();
@@ -141,13 +200,14 @@ export function initRouter(): void {
     }
   });
 
-  chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg?.type === "chat_message") {
       connector.send({ type: "chat_message", payload: msg.payload });
     }
 
     if (msg?.type === "page_detected") {
       const trust = classifyTrust(msg.payload?.url);
+      void syncSidePanelForTab(sender.tab);
       postRuntimeMessage({
         type: "page_context",
         payload: msg.payload,

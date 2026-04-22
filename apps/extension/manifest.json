@@ -4,6 +4,9 @@
   "version": "0.1.0",
   "description": "AI copilot for Indian Income Tax e-Filing portal.",
   "permissions": ["storage", "scripting", "sidePanel", "tabs"],
+  "action": {
+    "default_title": "Open IncomeTax Agent"
+  },
   "host_permissions": [
     "https://incometax.gov.in/*",
     "https://*.incometax.gov.in/*",
