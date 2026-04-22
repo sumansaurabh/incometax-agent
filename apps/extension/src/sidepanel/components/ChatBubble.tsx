@@ -1,11 +1,21 @@
 import React, { useState } from "react";
 
 import { ChatMessage } from "./chat-types";
+import { DiffCard, ProposalCard } from "./DiffCard";
 import { MessageCard } from "./MessageCard";
+
+type DecisionInput = {
+  proposalId: string;
+  approvalKey: string;
+  approved: boolean;
+  reason?: string;
+};
 
 type Props = {
   message: ChatMessage;
   onCardAction: (actionId: string) => void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  onProposalDecision?: (input: DecisionInput) => Promise<any>;
 };
 
 function formatRelativeTime(iso: string): string {
@@ -67,10 +77,11 @@ function MarkdownLite({ content }: { content: string }): JSX.Element {
   return <>{blocks}</>;
 }
 
-export function ChatBubble({ message, onCardAction }: Props): JSX.Element {
+export function ChatBubble({ message, onCardAction, onProposalDecision }: Props): JSX.Element {
   const [copied, setCopied] = useState(false);
   const isUser = message.role === "user";
   const canCopy = message.role === "agent" && message.content.trim().length > 0;
+  const proposals = message.proposals ?? [];
 
   return (
     <div className={`chat-row ${message.role}`}>
@@ -79,6 +90,15 @@ export function ChatBubble({ message, onCardAction }: Props): JSX.Element {
         {message.cards?.map((card) => (
           <MessageCard key={card.id} card={card} onAction={onCardAction} />
         ))}
+        {proposals.length && onProposalDecision
+          ? proposals.map((proposal) => (
+              <DiffCard
+                key={proposal.proposal_id}
+                proposal={proposal as ProposalCard}
+                onDecision={onProposalDecision}
+              />
+            ))
+          : null}
         <div className="message-footer">
           <span>{formatRelativeTime(message.createdAt)}</span>
           {isUser ? <span className={`message-status ${message.status ?? "sent"}`}>{message.status ?? "sent"}</span> : null}

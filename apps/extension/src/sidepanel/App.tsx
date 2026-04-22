@@ -94,6 +94,10 @@ function makeWelcomeMessage(): ChatMessage {
 
 function mapServerMessage(message: ChatApiMessage): ChatMessage {
   const metadataCards = Array.isArray(message.metadata?.cards) ? (message.metadata.cards as ChatCard[]) : [];
+  const proposalsRaw = message.metadata?.proposals;
+  const proposals = Array.isArray(proposalsRaw)
+    ? (proposalsRaw as ChatMessage["proposals"])
+    : undefined;
   return {
     id: message.id,
     role: message.role,
@@ -101,6 +105,7 @@ function mapServerMessage(message: ChatApiMessage): ChatMessage {
     createdAt: message.created_at,
     status: message.role === "user" ? "delivered" : undefined,
     cards: metadataCards,
+    proposals,
   };
 }
 
@@ -620,6 +625,28 @@ export default function App(): JSX.Element {
     }
   };
 
+  const handleProposalDecision = async (input: {
+    proposalId: string;
+    approvalKey: string;
+    approved: boolean;
+    reason?: string;
+  }): Promise<{ approval_status: string; approved_actions: string[] }> => {
+    if (!session) {
+      throw new Error("No active chat session.");
+    }
+    // Re-use the existing /api/actions/decision endpoint. The approval_key we created with
+    // the proposal is the approval identifier the backend looks up.
+    const result = await decideApproval({
+      threadId: session.threadId,
+      approvalId: input.approvalKey,
+      approved: input.approved,
+      rejectionReason: input.approved ? undefined : input.reason ?? "user_declined",
+    });
+    // Pull fresh state so the document strip / fact panel reflect the approval.
+    await refreshBackendState(session.threadId);
+    return result;
+  };
+
   const handleApproval = async (approvalId: string, approved: boolean) => {
     if (!session) return;
     setIsBusy(true);
@@ -756,6 +783,7 @@ export default function App(): JSX.Element {
         onSend={handleSend}
         onFilesSelected={handleFilesSelected}
         onAction={handleAction}
+        onProposalDecision={handleProposalDecision}
       />
       <SettingsDrawer
         open={settingsOpen}

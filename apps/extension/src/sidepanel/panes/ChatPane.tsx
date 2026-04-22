@@ -7,6 +7,13 @@ import { FileUpload } from "../components/FileUpload";
 import { MessageCard } from "../components/MessageCard";
 import { TypingIndicator } from "../components/TypingIndicator";
 
+type ProposalDecisionInput = {
+  proposalId: string;
+  approvalKey: string;
+  approved: boolean;
+  reason?: string;
+};
+
 type Props = {
   messages: ChatMessage[];
   contextualCards: ChatCard[];
@@ -16,6 +23,8 @@ type Props = {
   onSend: (message: string) => void;
   onFilesSelected: (files: File[]) => void;
   onAction: (actionId: string) => void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  onProposalDecision?: (input: ProposalDecisionInput) => Promise<any>;
 };
 
 function dateKey(iso: string): string {
@@ -31,6 +40,7 @@ export function ChatPane({
   onSend,
   onFilesSelected,
   onAction,
+  onProposalDecision,
 }: Props): JSX.Element {
   const listRef = useRef<HTMLDivElement | null>(null);
   const [showJump, setShowJump] = useState(false);
@@ -65,7 +75,7 @@ export function ChatPane({
           {groupedMessages.map(({ message, showDate }) => (
             <React.Fragment key={message.id}>
               {showDate ? <div className="date-divider">{dateKey(message.createdAt)}</div> : null}
-              <ChatBubble message={message} onCardAction={onAction} />
+              <ChatBubble message={message} onCardAction={onAction} onProposalDecision={onProposalDecision} />
             </React.Fragment>
           ))}
           {contextualCards.length ? (

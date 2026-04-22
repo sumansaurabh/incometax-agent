@@ -25,6 +25,38 @@ export type ChatMessage = {
   createdAt: string;
   status?: ChatMessageStatus;
   cards?: ChatCard[];
+  /**
+   * Agent-produced fill proposals (from propose_fill). The DiffCard component renders
+   * each of these inline with the assistant message so the user can review and approve
+   * without leaving the chat flow.
+   */
+  proposals?: Array<{
+    proposal_id: string;
+    approval_key: string;
+    status: string;
+    sensitivity?: string | null;
+    expires_at?: string | null;
+    total_actions?: number;
+    high_confidence_actions?: number;
+    low_confidence_actions?: number;
+    message?: string | null;
+    pages: Array<{
+      page_type: string;
+      page_title: string;
+      actions: Array<{
+        action_id: string;
+        field_id: string;
+        field_label: string;
+        selector: string;
+        value: unknown;
+        formatted_value: string;
+        confidence: number;
+        confidence_level: "high" | "medium" | "low";
+        source_document?: string | null;
+        requires_approval: boolean;
+      }>;
+    }>;
+  }>;
 };
 
 export type UploadedDocument = {

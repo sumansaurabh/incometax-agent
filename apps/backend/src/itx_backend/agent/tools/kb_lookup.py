@@ -104,14 +104,20 @@ class _KnowledgeBase:
         title = str(entry.get("title", "")).lower()
         body = str(entry.get("body", "")).lower()
 
-        # Exact alias match is a strong signal — short queries like "87A" or "AIS" should land here.
+        # Alias matches are the strongest signal. We accumulate all matching aliases rather than
+        # returning on the first hit so longer queries (e.g. "updated return 139(8A)") don't
+        # prematurely score lower than entries that merely share a section number.
+        alias_bonus = 0.0
         for alias in aliases:
             if alias == query_raw:
-                return 10.0
-            if alias and alias in query_raw:
-                return 6.0
+                alias_bonus = max(alias_bonus, 10.0)
+            elif alias and alias in query_raw:
+                # Longer alias substrings are more specific — weight by length so "updated return"
+                # outscores a bare "139" match.
+                weight = 6.0 + min(len(alias), 30) * 0.1
+                alias_bonus = max(alias_bonus, weight)
 
-        if not query_tokens:
+        if not query_tokens and alias_bonus == 0.0:
             return 0.0
 
         alias_tokens: set[str] = set()
@@ -124,7 +130,11 @@ class _KnowledgeBase:
         title_overlap = len(query_tokens & title_tokens)
         body_overlap = len(query_tokens & body_tokens)
 
-        return alias_overlap * 3.0 + title_overlap * 2.0 + body_overlap * 0.5
+        token_score = alias_overlap * 3.0 + title_overlap * 2.0 + body_overlap * 0.5
+        # An exact-alias hit trumps token scoring; otherwise combine.
+        if alias_bonus >= 10.0:
+            return alias_bonus
+        return alias_bonus + token_score
 
     def topics(self) -> list[str]:
         self._ensure_loaded()

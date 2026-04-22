@@ -65,11 +65,21 @@ class ChatService:
             context=context,
         )
         agent_content = turn.get("content") or "I do not have an answer right now. Please try again."
+        tool_calls = turn.get("tool_calls") or []
+        proposals = self._extract_proposals(tool_calls)
+        # Scrub raw results from the persisted metadata — they can be large and occasionally
+        # include chunk text. Keep name/input/is_error for observability.
+        scrubbed_tool_calls = [
+            {k: v for k, v in call.items() if k != "result"}
+            for call in tool_calls
+        ]
         metadata: dict[str, Any] = {
-            "tool_calls": turn.get("tool_calls") or [],
+            "tool_calls": scrubbed_tool_calls,
             "steps": turn.get("steps", 0),
             "agent": turn.get("metadata") or {},
         }
+        if proposals:
+            metadata["proposals"] = proposals
 
         agent_message = await self._create_message(
             thread_id=thread_id,
@@ -83,6 +93,39 @@ class ChatService:
             "user_message": user_message,
             "agent_message": agent_message,
         }
+
+    def _extract_proposals(self, tool_calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Pick up any propose_fill results so the extension can render a diff card.
+
+        The runner now attaches `result` to each tool call. We filter for successful propose_fill
+        calls that yielded a proposal_id — nothing_to_fill or errors are intentionally dropped
+        from the chat metadata so the UI does not render empty cards.
+        """
+        proposals: list[dict[str, Any]] = []
+        for call in tool_calls:
+            if call.get("name") != "propose_fill" or call.get("is_error"):
+                continue
+            result = call.get("result") or {}
+            if not isinstance(result, dict):
+                continue
+            proposal_id = result.get("proposal_id")
+            if not proposal_id:
+                continue
+            proposals.append(
+                {
+                    "proposal_id": proposal_id,
+                    "approval_key": result.get("approval_key"),
+                    "status": result.get("status"),
+                    "sensitivity": result.get("sensitivity"),
+                    "expires_at": result.get("expires_at"),
+                    "total_actions": result.get("total_actions"),
+                    "high_confidence_actions": result.get("high_confidence_actions"),
+                    "low_confidence_actions": result.get("low_confidence_actions"),
+                    "pages": result.get("pages") or [],
+                    "message": result.get("message"),
+                }
+            )
+        return proposals
 
     async def _load_history_for_llm(self, *, thread_id: str) -> list[dict[str, Any]]:
         """Pull the last N persisted messages and reshape them into Anthropic's format.

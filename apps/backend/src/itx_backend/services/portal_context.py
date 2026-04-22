@@ -26,16 +26,21 @@ class PortalContextService:
         if not thread_id or not isinstance(context, dict):
             return
 
-        current_url = self._coerce_str(context.get("current_url") or context.get("url"))
-        page_title = self._coerce_str(context.get("page_title") or context.get("title"))
-        page_type = self._coerce_str(context.get("page_type"))
-        focused_field = self._coerce_str(context.get("focused_field"))
+        # The extension posts {page, portal_state: {fields, errors, currentUrl, ...}, pilot_mode}.
+        # Tools downstream expect {fields, errors, current_url, page_title, ...} at the top level.
+        # Merge the nested snapshot up so either shape works.
+        merged = self._flatten_context(context)
 
-        raw_fields = context.get("fields")
+        current_url = self._coerce_str(merged.get("current_url") or merged.get("url"))
+        page_title = self._coerce_str(merged.get("page_title") or merged.get("title"))
+        page_type = self._coerce_str(merged.get("page_type") or context.get("page"))
+        focused_field = self._coerce_str(merged.get("focused_field"))
+
+        raw_fields = merged.get("fields")
         fields = raw_fields if isinstance(raw_fields, list) else []
         fields = fields[:_MAX_FIELDS]
 
-        raw_errors = context.get("errors")
+        raw_errors = merged.get("errors") or merged.get("validation_errors")
         errors = raw_errors if isinstance(raw_errors, list) else []
         errors = errors[:_MAX_ERRORS]
 
@@ -109,6 +114,29 @@ class PortalContextService:
         if not text:
             return None
         return text[:1024]
+
+    def _flatten_context(self, context: dict[str, Any]) -> dict[str, Any]:
+        """Accept both the flat `{fields, errors, ...}` shape and the extension's nested
+        `{portal_state: {...}}` wrapper, and normalise camelCase extension keys to snake_case.
+
+        Outer context keys take precedence over inner portal_state keys so a caller can override
+        any individual field without wrapping the whole payload.
+        """
+        nested = context.get("portal_state")
+        base = dict(nested) if isinstance(nested, dict) else {}
+        base.update({key: value for key, value in context.items() if key != "portal_state"})
+
+        alias_map = {
+            "currentUrl": "current_url",
+            "pageTitle": "page_title",
+            "pageType": "page_type",
+            "focusedField": "focused_field",
+            "validationErrors": "errors",
+        }
+        for src, dst in alias_map.items():
+            if src in base and dst not in base:
+                base[dst] = base[src]
+        return base
 
 
 portal_context_service = PortalContextService()

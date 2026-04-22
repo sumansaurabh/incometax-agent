@@ -103,6 +103,10 @@ class AgentRunner:
                         "name": tool_name,
                         "input": tool_input,
                         "is_error": is_error,
+                        # Surface the tool's raw result so the chat layer can extract structured
+                        # payloads (e.g. propose_fill proposals) without re-executing the tool.
+                        # Keep it best-effort — some results are large, but the chat service trims.
+                        "result": result_payload,
                     }
                 )
                 tool_result_blocks.append(
