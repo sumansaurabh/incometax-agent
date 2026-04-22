@@ -1,7 +1,7 @@
 from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from itx_backend.security.request_auth import get_request_auth
 from itx_backend.services.auth_runtime import AuthError, auth_runtime
@@ -9,8 +9,16 @@ from itx_backend.services.auth_runtime import AuthError, auth_runtime
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
+class SignupRequest(BaseModel):
+    email: str
+    password: str = Field(min_length=8, max_length=128)
+    device_id: str
+    device_name: Optional[str] = None
+
+
 class LoginRequest(BaseModel):
     email: str
+    password: str
     device_id: str
     device_name: Optional[str] = None
 
@@ -20,11 +28,26 @@ class RefreshRequest(BaseModel):
     device_id: str
 
 
+@router.post("/signup")
+async def signup(payload: SignupRequest, user_agent: Optional[str] = Header(default=None, alias="User-Agent")) -> dict[str, str]:
+    try:
+        return await auth_runtime.signup(
+            email=payload.email,
+            password=payload.password,
+            device_id=payload.device_id,
+            device_name=payload.device_name,
+            user_agent=user_agent,
+        )
+    except AuthError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.code) from exc
+
+
 @router.post("/login")
 async def login(payload: LoginRequest, user_agent: Optional[str] = Header(default=None, alias="User-Agent")) -> dict[str, str]:
     try:
         return await auth_runtime.login(
             email=payload.email,
+            password=payload.password,
             device_id=payload.device_id,
             device_name=payload.device_name,
             user_agent=user_agent,

@@ -212,6 +212,8 @@ export default function App(): JSX.Element {
   const [authSession, setAuthSession] = useState<AuthSession | null>(null);
   const [identity, setIdentity] = useState<AuthIdentity | null>(null);
   const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authError, setAuthError] = useState<string | null>(null);
   const [trustStatus, setTrustStatus] = useState<TrustStatus | null>(null);
   const [consentCatalog, setConsentCatalog] = useState<ConsentCatalogItem[]>([]);
   const [selectedConsentPurposes, setSelectedConsentPurposes] = useState<string[]>([]);
@@ -1075,25 +1077,31 @@ export default function App(): JSX.Element {
   };
 
   const handleLogin = async () => {
-    if (!authEmail.trim()) {
-      appendMessage("Enter an email address to sign in.");
+    const email = authEmail.trim();
+    if (!email || !authPassword) {
+      setAuthError("Enter your email and password to sign in.");
       return;
     }
 
     setIsBusy(true);
+    setAuthError(null);
     try {
       const nextAuth = await loginToBackend({
-        email: authEmail.trim(),
+        email,
+        password: authPassword,
         deviceId: await getOrCreateDeviceId(),
         deviceName: defaultDeviceName(),
       });
       await saveAuthSession(nextAuth);
       setAuthSession(nextAuth);
+      setAuthPassword("");
       chrome.runtime.sendMessage({ type: "auth_session_updated" });
       appendMessage(`Signed in as ${nextAuth.email}.`);
       await initialize();
     } catch (error: unknown) {
-      appendMessage(`Sign-in failed: ${error instanceof Error ? error.message : "unknown error"}`);
+      const message = error instanceof Error ? error.message : "Sign-in failed.";
+      setAuthError(message);
+      appendMessage(`Sign-in failed: ${message}`);
     } finally {
       setIsBusy(false);
     }
@@ -1317,16 +1325,45 @@ export default function App(): JSX.Element {
       <main>
         <h2>IncomeTax Agent</h2>
         {trustStatus ? <p>Portal trust: {trustStatus.message}</p> : null}
-        <p>Sign in to bind this browser device and start a protected filing session.</p>
-        <input
-          value={authEmail}
-          onChange={(event) => setAuthEmail(event.target.value)}
-          placeholder="Email address"
-          type="email"
-        />
-        <button disabled={isBusy} onClick={() => void handleLogin()}>
-          Sign in on this device
-        </button>
+        <p>Sign in with the credentials you created in the CA dashboard to start a protected filing session.</p>
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            void handleLogin();
+          }}
+          style={{ display: "grid", gap: 10, maxWidth: 360 }}
+        >
+          <label style={{ display: "grid", gap: 4 }}>
+            <span>Email</span>
+            <input
+              value={authEmail}
+              onChange={(event) => setAuthEmail(event.target.value)}
+              placeholder="you@firm.com"
+              type="email"
+              autoComplete="email"
+              required
+            />
+          </label>
+          <label style={{ display: "grid", gap: 4 }}>
+            <span>Password</span>
+            <input
+              value={authPassword}
+              onChange={(event) => setAuthPassword(event.target.value)}
+              placeholder="Password"
+              type="password"
+              autoComplete="current-password"
+              minLength={8}
+              required
+            />
+          </label>
+          {authError ? <p style={{ color: "#a32c2c", margin: 0 }}>{authError}</p> : null}
+          <button type="submit" disabled={isBusy}>
+            Sign in on this device
+          </button>
+          <p style={{ fontSize: 12, color: "#5a676d", margin: 0 }}>
+            Don't have an account yet? Create one from the CA dashboard, then return here to sign in.
+          </p>
+        </form>
       </main>
     );
   }

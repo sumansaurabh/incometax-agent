@@ -491,38 +491,67 @@ async function unauthenticatedRequest<T>(path: string, init?: RequestInitWithJso
   return response.json() as Promise<T>;
 }
 
+const AUTH_ERROR_MESSAGES: Record<string, string> = {
+  invalid_credentials: "Incorrect email or password.",
+  invalid_email: "Enter a valid email address.",
+  password_too_short: "Password must be at least 8 characters.",
+  password_too_long: "Password is too long (max 128 characters).",
+  password_required: "Password is required.",
+  email_already_registered: "An account with this email already exists. Sign in instead.",
+  device_id_required: "Browser device could not be identified. Please reload the extension.",
+  authorization_required: "Please sign in to continue.",
+  session_not_found: "Your session has ended. Sign in again.",
+  session_revoked: "This session was revoked. Sign in again.",
+  access_token_expired: "Your session expired. Sign in again.",
+  refresh_token_expired: "Your session expired. Sign in again.",
+  device_mismatch: "This session is bound to a different browser.",
+  invalid_token: "Session is invalid. Sign in again.",
+};
+
 export async function loginToBackend(input: {
   email: string;
+  password: string;
   deviceId: string;
   deviceName: string;
 }): Promise<AuthSession> {
-  const payload = await unauthenticatedRequest<{
-    user_id: string;
-    email: string;
-    device_id: string;
-    session_id: string;
-    access_token: string;
-    refresh_token: string;
-    access_expires_at: string;
-    refresh_expires_at: string;
-  }>("/api/auth/login", {
-    method: "POST",
-    body: JSON.stringify({
-      email: input.email,
-      device_id: input.deviceId,
-      device_name: input.deviceName,
-    }),
-  });
-  return {
-    userId: payload.user_id,
-    email: payload.email,
-    deviceId: payload.device_id,
-    sessionId: payload.session_id,
-    accessToken: payload.access_token,
-    refreshToken: payload.refresh_token,
-    accessExpiresAt: payload.access_expires_at,
-    refreshExpiresAt: payload.refresh_expires_at,
-  };
+  try {
+    const payload = await unauthenticatedRequest<{
+      user_id: string;
+      email: string;
+      device_id: string;
+      session_id: string;
+      access_token: string;
+      refresh_token: string;
+      access_expires_at: string;
+      refresh_expires_at: string;
+    }>("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({
+        email: input.email,
+        password: input.password,
+        device_id: input.deviceId,
+        device_name: input.deviceName,
+      }),
+    });
+    return {
+      userId: payload.user_id,
+      email: payload.email,
+      deviceId: payload.device_id,
+      sessionId: payload.session_id,
+      accessToken: payload.access_token,
+      refreshToken: payload.refresh_token,
+      accessExpiresAt: payload.access_expires_at,
+      refreshExpiresAt: payload.refresh_expires_at,
+    };
+  } catch (error) {
+    if (error instanceof Error) {
+      const friendly = AUTH_ERROR_MESSAGES[error.message];
+      if (friendly) {
+        throw new Error(friendly);
+      }
+    }
+    throw error;
+  }
 }
 
 export async function fetchCurrentIdentity(): Promise<AuthIdentity> {

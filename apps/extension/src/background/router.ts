@@ -262,17 +262,31 @@ export function initRouter(): void {
     }
 
     if (msg?.type === "open_side_panel") {
-      void (async () => {
-        const tabId = msg.payload?.tabId ?? await getTrustedActiveTabId();
-        const tab = await chrome.tabs.get(tabId);
-        await openSidePanelForTab(tab);
-        sendResponse({ ok: true });
-      })().catch((error: unknown) => {
-        sendResponse({
-          ok: false,
-          error: error instanceof Error ? error.message : "unknown_error",
-        });
-      });
+      // `chrome.sidePanel.open` requires an active user gesture. The gesture
+      // propagates through `runtime.onMessage` from a content-script click,
+      // but ANY await before calling open() loses it. Call it synchronously
+      // using sender.tab — the content script only runs on the trusted
+      // portal host per manifest, so we already know the tab is trusted.
+      const tabId = sender.tab?.id;
+      const windowId = sender.tab?.windowId;
+      if (typeof tabId !== "number") {
+        sendResponse({ ok: false, error: "missing_tab_context" });
+        return false;
+      }
+
+      chrome.sidePanel.setOptions({ tabId, path: SIDEPANEL_PATH, enabled: true }).catch(() => undefined);
+      const openArgs: chrome.sidePanel.OpenOptions =
+        typeof windowId === "number" ? { tabId, windowId } : { tabId };
+      chrome.sidePanel.open(openArgs).then(
+        () => sendResponse({ ok: true }),
+        (error: unknown) => {
+          console.warn("side panel open failed", error);
+          sendResponse({
+            ok: false,
+            error: error instanceof Error ? error.message : "unknown_error",
+          });
+        }
+      );
       return true;
     }
 

@@ -2,11 +2,15 @@ import "./styles.css";
 
 import { buildCADashboardModel, DashboardOperationsSnapshot, ClientReviewRow } from "./ca-dashboard";
 
-type LoginResponse = {
+type AuthResponse = {
+  user_id: string;
+  email: string;
+  device_id: string;
+  session_id: string;
   access_token: string;
   refresh_token: string;
-  device_id: string;
-  email: string;
+  access_expires_at: string;
+  refresh_expires_at: string;
 };
 
 type DashboardApiResponse = {
@@ -42,17 +46,18 @@ type ReplayPipelineResponse = {
 };
 
 type Session = {
-  backendUrl: string;
   accessToken: string;
+  refreshToken: string;
   deviceId: string;
   email: string;
 };
 
-const storageKey = "itx-ca-dashboard-session";
-const defaultBackendUrl = import.meta.env.VITE_ITX_BACKEND_BASE_URL || "http://localhost:8000";
+const sessionKey = "itx-ca-dashboard-session";
+const deviceKey = "itx-ca-dashboard-device";
+const BACKEND_URL = import.meta.env.VITE_ITX_BACKEND_BASE_URL || "http://localhost:8000";
 
 function loadSession(): Session | null {
-  const raw = window.localStorage.getItem(storageKey);
+  const raw = window.localStorage.getItem(sessionKey);
   if (!raw) {
     return null;
   }
@@ -64,15 +69,25 @@ function loadSession(): Session | null {
 }
 
 function saveSession(session: Session): void {
-  window.localStorage.setItem(storageKey, JSON.stringify(session));
+  window.localStorage.setItem(sessionKey, JSON.stringify(session));
 }
 
 function clearSession(): void {
-  window.localStorage.removeItem(storageKey);
+  window.localStorage.removeItem(sessionKey);
+}
+
+function getOrCreateDeviceId(): string {
+  const existing = window.localStorage.getItem(deviceKey);
+  if (existing) {
+    return existing;
+  }
+  const next = window.crypto.randomUUID();
+  window.localStorage.setItem(deviceKey, next);
+  return next;
 }
 
 async function apiRequest<T>(session: Session, path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${session.backendUrl}${path}`, {
+  const response = await fetch(`${BACKEND_URL}${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",
@@ -83,33 +98,67 @@ async function apiRequest<T>(session: Session, path: string, init?: RequestInit)
   });
   if (!response.ok) {
     const payload = (await response.json().catch(() => null)) as { detail?: string; error?: string } | null;
-    throw new Error(payload?.detail ?? payload?.error ?? `Request failed: ${response.status}`);
+    throw new Error(translateErrorCode(payload?.detail ?? payload?.error) ?? `Request failed: ${response.status}`);
   }
   return response.json() as Promise<T>;
 }
 
-async function login(email: string, backendUrl: string): Promise<Session> {
-  const deviceId = window.crypto.randomUUID();
-  const response = await fetch(`${backendUrl}/api/auth/login`, {
+function translateErrorCode(code?: string): string | undefined {
+  if (!code) return undefined;
+  const map: Record<string, string> = {
+    invalid_credentials: "Incorrect email or password.",
+    invalid_email: "Enter a valid email address.",
+    password_too_short: "Password must be at least 8 characters.",
+    password_too_long: "Password is too long (max 128 characters).",
+    password_required: "Password is required.",
+    email_already_registered: "An account with this email already exists. Sign in instead.",
+    device_id_required: "Browser device could not be identified. Please reload the page.",
+    authorization_required: "Please sign in to continue.",
+    session_not_found: "Your session has ended. Sign in again.",
+    session_revoked: "This session was revoked. Sign in again.",
+    access_token_expired: "Your session expired. Sign in again.",
+    refresh_token_expired: "Your session expired. Sign in again.",
+    device_mismatch: "This session is bound to a different browser.",
+    invalid_token: "Session is invalid. Sign in again.",
+  };
+  return map[code];
+}
+
+async function callAuthEndpoint(path: "/api/auth/signup" | "/api/auth/login", body: Record<string, unknown>): Promise<Session> {
+  const response = await fetch(`${BACKEND_URL}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      email,
-      device_id: deviceId,
-      device_name: "CA Dashboard Browser",
-    }),
+    body: JSON.stringify(body),
   });
-  if (!response.ok) {
-    const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
-    throw new Error(payload?.detail ?? `Login failed: ${response.status}`);
+  const payload = (await response.json().catch(() => null)) as (AuthResponse & { detail?: string; error?: string }) | null;
+  if (!response.ok || !payload || !("access_token" in payload)) {
+    const code = payload?.detail ?? payload?.error;
+    throw new Error(translateErrorCode(code) ?? code ?? `Request failed: ${response.status}`);
   }
-  const payload = (await response.json()) as LoginResponse;
   return {
-    backendUrl,
     accessToken: payload.access_token,
+    refreshToken: payload.refresh_token,
     deviceId: payload.device_id,
     email: payload.email,
   };
+}
+
+async function signup(email: string, password: string): Promise<Session> {
+  return callAuthEndpoint("/api/auth/signup", {
+    email,
+    password,
+    device_id: getOrCreateDeviceId(),
+    device_name: "CA Dashboard Browser",
+  });
+}
+
+async function signin(email: string, password: string): Promise<Session> {
+  return callAuthEndpoint("/api/auth/login", {
+    email,
+    password,
+    device_id: getOrCreateDeviceId(),
+    device_name: "CA Dashboard Browser",
+  });
 }
 
 function escapeHtml(value: string): string {
@@ -121,26 +170,40 @@ function escapeHtml(value: string): string {
     .replaceAll("'", "&#39;");
 }
 
-function renderLogin(message = ""): string {
+function renderAuth(mode: "signin" | "signup", message = "", error = ""): string {
+  const isSignup = mode === "signup";
+  const title = isSignup ? "Create your account" : "Sign in";
+  const cta = isSignup ? "Create account" : "Sign in";
+  const toggleText = isSignup ? "Already have an account? Sign in." : "Need an account? Create one.";
+  const toggleMode = isSignup ? "signin" : "signup";
+
   return `
     <div class="shell">
       <section class="hero">
         <div class="panel">
           <h1>CA control room for assisted filing.</h1>
           <p>Review queue health, replay drift, submission blockers, and client readiness from one surface.</p>
-          ${message ? `<p><strong>${escapeHtml(message)}</strong></p>` : ""}
+          ${message ? `<p class="flash-info">${escapeHtml(message)}</p>` : ""}
+          ${error ? `<p class="flash-error">${escapeHtml(error)}</p>` : ""}
         </div>
         <div class="panel">
-          <form class="login-form" id="login-form">
+          <h2>${escapeHtml(title)}</h2>
+          <form class="login-form" id="auth-form" data-mode="${mode}">
             <label>
-              Backend URL
-              <input name="backendUrl" value="${escapeHtml(defaultBackendUrl)}" />
+              Email
+              <input name="email" type="email" autocomplete="email" placeholder="you@firm.com" required />
             </label>
             <label>
-              Operator email
-              <input name="email" type="email" placeholder="ca@example.com" required />
+              Password
+              <input name="password" type="password" autocomplete="${isSignup ? "new-password" : "current-password"}" minlength="8" required />
             </label>
-            <button type="submit">Sign in to dashboard</button>
+            ${isSignup ? `
+            <label>
+              Confirm password
+              <input name="confirmPassword" type="password" autocomplete="new-password" minlength="8" required />
+            </label>` : ""}
+            <button type="submit">${escapeHtml(cta)}</button>
+            <button type="button" class="secondary" data-toggle-mode="${toggleMode}">${escapeHtml(toggleText)}</button>
           </form>
         </div>
       </section>
@@ -200,11 +263,10 @@ function renderDashboard(session: Session, response: DashboardApiResponse, repla
           </div>
         </div>
         <div class="panel controls">
-          ${flash ? `<p><strong>${escapeHtml(flash)}</strong></p>` : ""}
+          ${flash ? `<p class="flash-info">${escapeHtml(flash)}</p>` : ""}
           <button id="refresh-dashboard">Refresh dashboard</button>
           <button id="run-replay-pipeline">Run replay pipeline</button>
           <button class="secondary" id="sign-out">Sign out</button>
-          <p>Backend: ${escapeHtml(session.backendUrl)}</p>
           <p>AI provider: ${escapeHtml(model.operations.aiProvider)}</p>
           ${replayRun ? `<p>Last replay run: ${replayRun.totals.runs_created} runs, ${(replayRun.totals.success_rate * 100).toFixed(1)}% success.</p>` : ""}
         </div>
@@ -264,6 +326,50 @@ async function runReplayPipeline(session: Session): Promise<ReplayPipelineRespon
   });
 }
 
+type AuthViewState = { mode: "signin" | "signup"; message?: string; error?: string };
+
+function renderAuthView(state: AuthViewState): void {
+  const app = document.querySelector<HTMLDivElement>("#app");
+  if (!app) return;
+
+  app.innerHTML = renderAuth(state.mode, state.message ?? "", state.error ?? "");
+
+  const form = document.querySelector<HTMLFormElement>("#auth-form");
+  form?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const data = new FormData(form);
+    const email = String(data.get("email") || "").trim();
+    const password = String(data.get("password") || "");
+    const confirm = String(data.get("confirmPassword") || "");
+
+    if (state.mode === "signup" && password !== confirm) {
+      renderAuthView({ mode: "signup", error: "Passwords do not match." });
+      return;
+    }
+
+    const submitButton = form.querySelector<HTMLButtonElement>('button[type="submit"]');
+    if (submitButton) submitButton.disabled = true;
+
+    try {
+      const session = state.mode === "signup" ? await signup(email, password) : await signin(email, password);
+      saveSession(session);
+      await bootstrap(state.mode === "signup" ? "Account created. Welcome!" : "Signed in successfully.");
+    } catch (error) {
+      renderAuthView({
+        mode: state.mode,
+        error: error instanceof Error ? error.message : "Authentication failed.",
+      });
+    }
+  });
+
+  document.querySelectorAll<HTMLButtonElement>("[data-toggle-mode]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const nextMode = button.getAttribute("data-toggle-mode") === "signup" ? "signup" : "signin";
+      renderAuthView({ mode: nextMode });
+    });
+  });
+}
+
 async function bootstrap(message = ""): Promise<void> {
   const app = document.querySelector<HTMLDivElement>("#app");
   if (!app) {
@@ -272,51 +378,24 @@ async function bootstrap(message = ""): Promise<void> {
 
   const session = loadSession();
   if (!session) {
-    app.innerHTML = renderLogin(message);
-    const loginForm = document.querySelector<HTMLFormElement>("#login-form");
-    loginForm?.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      const form = new FormData(loginForm);
-      const email = String(form.get("email") || "").trim();
-      const backendUrl = String(form.get("backendUrl") || defaultBackendUrl).trim();
-      try {
-        const nextSession = await login(email, backendUrl);
-        saveSession(nextSession);
-        await bootstrap("Signed in successfully.");
-      } catch (error) {
-        await bootstrap(error instanceof Error ? error.message : "Login failed.");
-      }
-    });
+    renderAuthView({ mode: "signin", message });
     return;
   }
 
   try {
     const data = await fetchDashboardData(session);
     app.innerHTML = renderDashboard(session, data, null, message);
-    document.querySelector<HTMLButtonElement>("#refresh-dashboard")?.addEventListener("click", () => {
-      void bootstrap("Dashboard refreshed.");
-    });
-    document.querySelector<HTMLButtonElement>("#run-replay-pipeline")?.addEventListener("click", async () => {
-      try {
-        const replayRun = await runReplayPipeline(session);
-        const fresh = await fetchDashboardData(session);
-        app.innerHTML = renderDashboard(session, fresh, replayRun, "Replay pipeline completed.");
-        void wireDashboardActions(session);
-      } catch (error) {
-        void bootstrap(error instanceof Error ? error.message : "Replay pipeline failed.");
-      }
-    });
-    document.querySelector<HTMLButtonElement>("#sign-out")?.addEventListener("click", () => {
-      clearSession();
-      void bootstrap("Signed out.");
-    });
+    wireDashboardActions(session);
   } catch (error) {
     clearSession();
-    await bootstrap(error instanceof Error ? error.message : "Dashboard bootstrap failed.");
+    renderAuthView({
+      mode: "signin",
+      error: error instanceof Error ? error.message : "Dashboard bootstrap failed.",
+    });
   }
 }
 
-async function wireDashboardActions(session: Session): Promise<void> {
+function wireDashboardActions(session: Session): void {
   document.querySelector<HTMLButtonElement>("#refresh-dashboard")?.addEventListener("click", () => {
     void bootstrap("Dashboard refreshed.");
   });
@@ -327,7 +406,7 @@ async function wireDashboardActions(session: Session): Promise<void> {
       const app = document.querySelector<HTMLDivElement>("#app");
       if (app) {
         app.innerHTML = renderDashboard(session, fresh, replayRun, "Replay pipeline completed.");
-        void wireDashboardActions(session);
+        wireDashboardActions(session);
       }
     } catch (error) {
       void bootstrap(error instanceof Error ? error.message : "Replay pipeline failed.");
@@ -335,7 +414,7 @@ async function wireDashboardActions(session: Session): Promise<void> {
   });
   document.querySelector<HTMLButtonElement>("#sign-out")?.addEventListener("click", () => {
     clearSession();
-    void bootstrap("Signed out.");
+    renderAuthView({ mode: "signin", message: "Signed out." });
   });
 }
 

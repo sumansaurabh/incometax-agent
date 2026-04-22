@@ -195,6 +195,31 @@ button:disabled {
   padding-left: 18px;
 }
 
+.flash-info {
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: rgba(13, 123, 104, 0.12);
+  color: var(--accent-strong);
+  border: 1px solid rgba(13, 123, 104, 0.25);
+  margin: 0;
+}
+
+.flash-error {
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: rgba(163, 44, 44, 0.1);
+  color: var(--danger);
+  border: 1px solid rgba(163, 44, 44, 0.25);
+  margin: 0;
+}
+
+.login-form label {
+  display: grid;
+  gap: 6px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
 .empty {
   padding: 18px;
   border-radius: 18px;
