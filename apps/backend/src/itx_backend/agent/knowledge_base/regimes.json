@@ -1,0 +1,29 @@
+{
+  "topic": "regimes",
+  "entries": [
+    {
+      "id": "regime_default",
+      "title": "Default regime (AY 2025-26)",
+      "aliases": ["default regime", "new regime default"],
+      "body": "From AY 2024-25 onwards the new tax regime (Section 115BAC) is the default. A taxpayer who wants the old regime must explicitly opt out. Salaried employees without business income can switch between the two every year. Taxpayers with business/professional income can opt out of the new regime only once in their lifetime (after which they can opt back in once)."
+    },
+    {
+      "id": "new_regime_slabs",
+      "title": "New regime slabs (AY 2025-26)",
+      "aliases": ["new regime slabs", "115BAC slabs", "new tax rates"],
+      "body": "New regime slabs for AY 2025-26 (Finance Act 2024):\n- Up to ₹3,00,000: Nil\n- ₹3,00,001 – ₹7,00,000: 5%\n- ₹7,00,001 – ₹10,00,000: 10%\n- ₹10,00,001 – ₹12,00,000: 15%\n- ₹12,00,001 – ₹15,00,000: 20%\n- Above ₹15,00,000: 30%\nStandard deduction of ₹75,000 is allowed against salary. Rebate u/s 87A is ₹25,000 for total income up to ₹7,00,000. Most Chapter VI-A deductions (80C, 80D etc.) are NOT allowed; 80CCD(2) employer NPS contribution IS allowed."
+    },
+    {
+      "id": "old_regime_slabs",
+      "title": "Old regime slabs (AY 2025-26)",
+      "aliases": ["old regime slabs", "old tax rates"],
+      "body": "Old regime slabs for individuals below 60 (AY 2025-26):\n- Up to ₹2,50,000: Nil\n- ₹2,50,001 – ₹5,00,000: 5%\n- ₹5,00,001 – ₹10,00,000: 20%\n- Above ₹10,00,000: 30%\nSenior citizens (60-80): basic exemption ₹3,00,000. Super seniors (80+): basic exemption ₹5,00,000. Standard deduction ₹50,000 is allowed against salary. 87A rebate ₹12,500 up to total income ₹5,00,000. All Chapter VI-A deductions (80C ₹1.5L, 80D, HRA, LTA, home-loan interest u/s 24, etc.) are available."
+    },
+    {
+      "id": "regime_choice_guidance",
+      "title": "Choosing old vs new regime",
+      "aliases": ["which regime", "regime comparison", "old vs new"],
+      "body": "New regime usually wins if deductions are modest (no home-loan interest, limited 80C/80D). Old regime usually wins if you have (a) home-loan interest ≥ ₹2L, (b) HRA exemption, and (c) 80C fully exhausted. The only reliable way to decide is to compute tax under both with your actual numbers — the agent should run both regimes via the calculator before recommending. The choice must be made every AY for salaried filers; business filers are more restricted."
+    }
+  ]
+}

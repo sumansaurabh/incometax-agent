@@ -1,0 +1,59 @@
+{
+  "topic": "definitions",
+  "entries": [
+    {
+      "id": "ais",
+      "title": "AIS — Annual Information Statement",
+      "aliases": ["AIS", "Annual Information Statement"],
+      "body": "The Annual Information Statement (AIS) is a comprehensive statement of financial transactions reported to the Income Tax Department for a taxpayer for a financial year. It consolidates information from multiple sources (employers, banks, mutual funds, stock exchanges, registrars) under categories like salary, interest, dividends, securities transactions, property transactions, and foreign remittances. You can download it from the e-Filing portal under Services → Annual Information Statement. Always reconcile the figures in the AIS with your Form 16, bank statements, and broker statements before filing; mismatches are a common source of notices."
+    },
+    {
+      "id": "tis",
+      "title": "TIS — Taxpayer Information Summary",
+      "aliases": ["TIS", "Taxpayer Information Summary"],
+      "body": "The Taxpayer Information Summary (TIS) is a condensed, category-wise summary of information reflected in the AIS. Where AIS lists every individual transaction, TIS aggregates them under each information head (e.g. total salary, total interest from savings) and shows a Processed Value (after applying deduplication/feedback rules). TIS values are used to pre-fill parts of the ITR. It is downloaded from the same page as AIS."
+    },
+    {
+      "id": "form16",
+      "title": "Form 16",
+      "aliases": ["Form 16", "Form-16", "TDS certificate salary"],
+      "body": "Form 16 is the TDS certificate issued by an employer to a salaried employee. It has two parts: Part A (TAN/PAN, quarterly TDS amounts, summary from TRACES) and Part B (detailed salary breakup, exemptions u/s 10, deductions u/s 16 and Chapter VI-A, taxable income, tax computed and deducted). It is the primary document for filing a salaried person's ITR. Employers are required to issue it by June 15 of the assessment year."
+    },
+    {
+      "id": "form26as",
+      "title": "Form 26AS",
+      "aliases": ["Form 26AS", "26AS", "tax credit statement"],
+      "body": "Form 26AS is the consolidated annual tax statement from the Income Tax Department, showing TDS, TCS, advance tax and self-assessment tax paid against your PAN, plus specified financial transactions. It is downloaded from the e-Filing portal. You should reconcile Form 26AS with Form 16 and AIS: all three should agree on TDS amounts. Discrepancies often point to the deductor not having filed their TDS return correctly."
+    },
+    {
+      "id": "standard_deduction",
+      "title": "Standard deduction (Section 16(ia))",
+      "aliases": ["standard deduction", "Section 16(ia)", "16(ia)"],
+      "body": "A flat deduction available against salary income without any proof. For AY 2025-26, the cap is ₹50,000 under the old regime and ₹75,000 under the new regime (increased from ₹50,000 in the Finance Act 2024). It is applied automatically at the salary-schedule stage; you do not need to submit any document. Pensioners receiving a pension taxable under the 'Salaries' head are also eligible."
+    },
+    {
+      "id": "hra",
+      "title": "HRA exemption (Section 10(13A))",
+      "aliases": ["HRA", "House Rent Allowance", "Section 10(13A)"],
+      "body": "House Rent Allowance is exempt under Section 10(13A) only if you actually pay rent and receive HRA from your employer. The exempt amount is the LEAST of: (a) actual HRA received, (b) 50% of salary if living in a metro (Mumbai/Delhi/Kolkata/Chennai) or 40% otherwise, (c) rent paid minus 10% of salary. Salary here means Basic + DA (if it forms part of retirement benefits) + fixed commission %. HRA exemption is not available under the new tax regime."
+    },
+    {
+      "id": "rebate_87a",
+      "title": "Rebate under Section 87A",
+      "aliases": ["87A", "Section 87A", "rebate"],
+      "body": "Section 87A provides a rebate to resident individuals whose total income does not exceed a threshold. For AY 2025-26: under the new regime, rebate is up to ₹25,000 if total income is up to ₹7,00,000 (effectively zero tax up to that level); under the old regime, rebate is up to ₹12,500 if total income is up to ₹5,00,000. The rebate is applied after computing tax but before cess. It is not available to non-residents."
+    },
+    {
+      "id": "presumptive_44ab",
+      "title": "Tax audit u/s 44AB",
+      "aliases": ["44AB", "Section 44AB", "tax audit"],
+      "body": "Section 44AB mandates a tax audit by a Chartered Accountant if: business turnover exceeds ₹1 crore in the previous year (or ₹10 crore where cash receipts/payments are ≤5% of total); or gross receipts from a profession exceed ₹50 lakh; or a presumptive-taxation taxpayer (44AD/44ADA) declares profits below the prescribed rate and total income exceeds the basic exemption. Most salaried filers answer NO to the 44AB question in the ITR wizard."
+    },
+    {
+      "id": "section_13a",
+      "title": "Political parties u/s 13A",
+      "aliases": ["13A", "Section 13A", "political party"],
+      "body": "Section 13A exempts the income of a registered political party (other than income from house property, capital gains, or business) subject to conditions. An individual ITR filer answers NO to the 13A question unless they are filing on behalf of a political party."
+    }
+  ]
+}

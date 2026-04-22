@@ -1,0 +1,29 @@
+{
+  "topic": "slabs",
+  "entries": [
+    {
+      "id": "slabs_new_2025_26",
+      "title": "New regime slabs — AY 2025-26 (FY 2024-25)",
+      "aliases": ["new regime slabs AY 2025-26", "115BAC slabs", "new tax slabs"],
+      "body": "Post-Finance Act 2024 slabs for the new regime, applicable to AY 2025-26:\n- ₹0 – ₹3,00,000: Nil\n- ₹3,00,001 – ₹7,00,000: 5%\n- ₹7,00,001 – ₹10,00,000: 10%\n- ₹10,00,001 – ₹12,00,000: 15%\n- ₹12,00,001 – ₹15,00,000: 20%\n- Above ₹15,00,000: 30%\nStandard deduction against salary: ₹75,000. Rebate u/s 87A: ₹25,000 if total income ≤ ₹7,00,000. Health & Education Cess: 4% on tax+surcharge."
+    },
+    {
+      "id": "slabs_old_2025_26",
+      "title": "Old regime slabs — AY 2025-26 (FY 2024-25)",
+      "aliases": ["old regime slabs AY 2025-26", "old tax slabs"],
+      "body": "Old regime slabs for individuals below 60:\n- ₹0 – ₹2,50,000: Nil\n- ₹2,50,001 – ₹5,00,000: 5%\n- ₹5,00,001 – ₹10,00,000: 20%\n- Above ₹10,00,000: 30%\nSenior citizens (age 60-80): basic exemption ₹3,00,000. Super seniors (80+): basic exemption ₹5,00,000. Standard deduction ₹50,000. Rebate 87A ₹12,500 up to ₹5,00,000. Cess 4%."
+    },
+    {
+      "id": "surcharge",
+      "title": "Surcharge rates (AY 2025-26)",
+      "aliases": ["surcharge", "high income surcharge"],
+      "body": "Surcharge on income tax for individuals:\n- Total income ₹50L – ₹1Cr: 10%\n- ₹1Cr – ₹2Cr: 15%\n- ₹2Cr – ₹5Cr: 25%\n- Above ₹5Cr: 37% under OLD regime; capped at 25% under the NEW regime.\nMarginal relief is available so that the incremental tax does not exceed the incremental income across each threshold."
+    },
+    {
+      "id": "ltcg_rates",
+      "title": "Capital-gains tax rates (AY 2025-26)",
+      "aliases": ["LTCG", "STCG", "capital gains rates"],
+      "body": "Finance (No.2) Act 2024 revised capital-gains rates, effective for transfers on or after 23 July 2024:\n- Listed equity/MF STCG (Section 111A): 20% (up from 15%).\n- Listed equity/MF LTCG (Section 112A): 12.5% on gains above ₹1.25 lakh exemption (up from 10% on ₹1L exemption).\n- Other LTCG (property, unlisted shares, debt MF): 12.5% without indexation. Resident individuals on property transferred before 23 July 2024 can still use the old 20%-with-indexation scheme."
+    }
+  ]
+}

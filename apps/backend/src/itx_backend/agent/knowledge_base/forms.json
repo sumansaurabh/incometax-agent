@@ -1,0 +1,35 @@
+{
+  "topic": "forms",
+  "entries": [
+    {
+      "id": "itr1",
+      "title": "ITR-1 (Sahaj)",
+      "aliases": ["ITR-1", "ITR1", "Sahaj"],
+      "body": "For resident individuals (not being not-ordinarily-resident) with total income up to ₹50 lakh, income only from: salary/pension, one house property (no brought-forward loss), other sources (excluding lottery/race-horses), and agricultural income up to ₹5,000. Cannot be used if you have capital gains, foreign assets, directorship in a company, unlisted equity shares, or TDS u/s 194N."
+    },
+    {
+      "id": "itr2",
+      "title": "ITR-2",
+      "aliases": ["ITR-2", "ITR2"],
+      "body": "For individuals and HUFs not having income from profits and gains of business or profession. Typical cases: salary + capital gains, multiple house properties, foreign income/assets, directorship, unlisted equity. Salaried filers with equity or mutual-fund capital gains usually fall here."
+    },
+    {
+      "id": "itr3",
+      "title": "ITR-3",
+      "aliases": ["ITR-3", "ITR3"],
+      "body": "For individuals and HUFs having income from profits and gains of business or profession — including F&O traders treating it as business income, and partners in partnership firms. All ITR-2 income heads are also declared here."
+    },
+    {
+      "id": "itr4",
+      "title": "ITR-4 (Sugam)",
+      "aliases": ["ITR-4", "ITR4", "Sugam"],
+      "body": "For resident individuals/HUFs/firms (other than LLP) with presumptive income u/s 44AD (business), 44ADA (profession), or 44AE (goods transport), and total income up to ₹50 lakh. Cannot be used if you have capital gains, more than one house property, or foreign assets."
+    },
+    {
+      "id": "itr_u",
+      "title": "ITR-U (updated return)",
+      "aliases": ["ITR-U", "updated return"],
+      "body": "The updated return form under Section 139(8A). Used to voluntarily declare additional income missed in the original/revised return, within 24 months (extending to 48 months as per Finance Act 2025) from the end of the AY. Cannot be used to claim a refund or reduce tax liability; additional tax of 25% or 50% applies over base tax + interest."
+    }
+  ]
+}

@@ -6,7 +6,7 @@ Scope: extension sidepanel, dashboard upload/search, backend document APIs, work
 ## Implementation Status After This Pass
 
 - The two uploaded PDFs in thread `8e04f368-5227-4106-8026-697770c87b7a` were revalidated directly against the live backend pipeline and restored into the local thread after validation.
-- Form 16 Part A now contributes employee name `AKANSHA SINHA`, employer `APTUSDATALABS TECHNOLOGIES PRIVATE LIMITED`, and salary TDS `82768.00`; Form 16 Part B contributes PAN `GWPPS0879L`, gross salary `730907.00`, standard deduction `75000.00`, taxable income `655907.00`, rebate `17796.00`, and employer TAN `BLRA20443D`.
+- Form 16 Part A now contributes employee name `SUMAN SAURABH`, employer `ATALABS TECHNOLOGIES PRIVATE LIMITED`, and salary TDS `82768.00`; Form 16 Part B contributes PAN `ABCDE1234F`, gross salary `730907.00`, standard deduction `75000.00`, taxable income `655907.00`, rebate `17796.00`, and employer TAN `ABCDE1234F`.
 - Postgres now stores durable document chunks in `document_chunks`; search uses those chunks before falling back to page text.
 - Search for `what is my salary` now returns the Form 16 Part B salary chunk first through `lexical_fallback`.
 - `process_immediately=true` now executes inline in the backend instead of enqueueing and racing the background worker, so synchronous uploads/reprocess calls no longer unpredictably return `queued`.

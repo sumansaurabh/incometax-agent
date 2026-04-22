@@ -54,6 +54,13 @@ class Settings(BaseModel):
     ai_model: str = os.getenv("ITX_AI_MODEL", "")
     ai_api_key: str = os.getenv("ITX_AI_API_KEY", os.getenv("OPENAI_API_KEY", os.getenv("ANTHROPIC_API_KEY", "")))
     ai_base_url: str = os.getenv("ITX_AI_BASE_URL", "")
+    anthropic_api_key: str = os.getenv("ITX_ANTHROPIC_API_KEY", os.getenv("ANTHROPIC_API_KEY", ""))
+    anthropic_base_url: str = os.getenv("ITX_ANTHROPIC_BASE_URL", "")
+    agent_model: str = os.getenv("ITX_AGENT_MODEL", "claude-sonnet-4-6")
+    agent_model_deep: str = os.getenv("ITX_AGENT_MODEL_DEEP", "claude-opus-4-7")
+    agent_max_steps: int = int(os.getenv("ITX_AGENT_MAX_STEPS", "6"))
+    agent_max_output_tokens: int = int(os.getenv("ITX_AGENT_MAX_OUTPUT_TOKENS", "1024"))
+    agent_request_timeout_seconds: int = int(os.getenv("ITX_AGENT_REQUEST_TIMEOUT_SECONDS", "60"))
     allowed_origins_csv: str = os.getenv("ITX_ALLOWED_ORIGINS", "http://localhost:4173,http://localhost:5173")
 
 

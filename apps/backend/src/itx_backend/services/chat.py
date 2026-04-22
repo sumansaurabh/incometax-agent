@@ -1,13 +1,21 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from typing import Any, Optional
 
 from asyncpg import Record
 
+from itx_backend.agent.runner import run_turn
 from itx_backend.db.session import get_pool
-from itx_backend.services.documents import document_service
+from itx_backend.services.portal_context import portal_context_service
+
+logger = logging.getLogger(__name__)
+
+# How many prior messages to feed back to the model. Keep this bounded — the model's system prompt
+# + tool schemas are already cached, but raw message history isn't.
+_HISTORY_WINDOW = 20
 
 
 class ChatService:
@@ -34,6 +42,14 @@ class ChatService:
         message: str,
         context: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
+        history = await self._load_history_for_llm(thread_id=thread_id)
+
+        if context:
+            try:
+                await portal_context_service.upsert(thread_id=thread_id, context=context)
+            except Exception:  # noqa: BLE001 — snapshot persistence must never break chat
+                logger.exception("portal_context_upsert_failed", extra={"thread_id": thread_id})
+
         user_message = await self._create_message(
             thread_id=thread_id,
             role="user",
@@ -41,7 +57,20 @@ class ChatService:
             message_type="text",
             metadata={"context": context or {}},
         )
-        agent_content, metadata = await self._build_agent_response(thread_id=thread_id, message=message)
+
+        turn = await run_turn(
+            thread_id=thread_id,
+            user_message=message,
+            history=history,
+            context=context,
+        )
+        agent_content = turn.get("content") or "I do not have an answer right now. Please try again."
+        metadata: dict[str, Any] = {
+            "tool_calls": turn.get("tool_calls") or [],
+            "steps": turn.get("steps", 0),
+            "agent": turn.get("metadata") or {},
+        }
+
         agent_message = await self._create_message(
             thread_id=thread_id,
             role="agent",
@@ -55,111 +84,24 @@ class ChatService:
             "agent_message": agent_message,
         }
 
-    async def _build_agent_response(self, *, thread_id: str, message: str) -> tuple[str, dict[str, Any]]:
-        normalized = message.lower()
-        documents = await document_service.list_documents(thread_id)
-        parsed_count = sum(1 for document in documents if document.get("status") in {"parsed", "indexed"})
-        indexed_count = sum(1 for document in documents if document.get("status") == "indexed")
-        required_documents = ["Form 16", "AIS", "TIS", "bank interest certificates", "deduction proofs"]
+    async def _load_history_for_llm(self, *, thread_id: str) -> list[dict[str, Any]]:
+        """Pull the last N persisted messages and reshape them into Anthropic's format.
 
-        if "file" in normalized and ("return" in normalized or "itr" in normalized or "tax" in normalized):
-            missing = self._missing_document_labels(documents)
-            cards = [
-                {
-                    "id": "filing-readiness",
-                    "kind": "document",
-                    "title": "Filing readiness",
-                    "body": "I will use uploaded documents first, search indexed chunks for missing facts, then ask only for gaps.",
-                    "meta": [
-                        {"label": "Uploaded", "value": str(len(documents))},
-                        {"label": "Parsed", "value": str(parsed_count)},
-                        {"label": "Indexed", "value": str(indexed_count)},
-                    ],
-                    "actions": [
-                        {"id": "upload-documents", "label": "Upload documents"},
-                        {"id": "search-documents", "label": "Search documents"},
-                        {"id": "prepare-fill", "label": "Prepare portal fill"},
-                    ],
-                }
-            ]
-            if missing:
-                return (
-                    "I can start the return. Upload these if available: "
-                    + ", ".join(missing)
-                    + ". If they are already uploaded, I will search the indexed document content next.",
-                    {"cards": cards, "missing_documents": missing},
-                )
-            return (
-                "I can start the return with the uploaded documents. I will search the indexed evidence, extract facts, and prepare the filing flow.",
-                {"cards": cards},
-            )
-
-        if "upload" in normalized or "document" in normalized:
-            return (
-                "Use the + button or drag PDFs, images, CSV, JSON, or text files into the chat. I will parse them and index searchable chunks.",
-                {
-                    "cards": [
-                        {
-                            "id": "upload-help",
-                            "kind": "document",
-                            "title": "Documents to upload",
-                            "body": ", ".join(required_documents),
-                            "actions": [{"id": "upload-documents", "label": "Upload documents"}],
-                        }
-                    ]
-                },
-            )
-
-        if "refund" in normalized:
-            return (
-                "Open the refund-status page on the official portal and ask me to capture it, or share the refund status text here.",
-                {"cards": [{"id": "refund-help", "kind": "summary", "title": "Refund status", "body": "I can capture the portal page when it is open."}]},
-            )
-
-        if "regime" in normalized:
-            return (
-                "I can compare old and new regimes once salary, deductions, and tax-paid facts are extracted from your documents.",
-                {"cards": [{"id": "regime-help", "kind": "summary", "title": "Regime comparison", "actions": [{"id": "compare-regimes", "label": "Compare regimes"}]}]},
-            )
-
-        if documents:
-            search = await document_service.semantic_search(thread_id=thread_id, query=message, top_k=3)
-            results = search.get("results", [])
-            if results:
-                top = results[0]
-                return (
-                    f"I found a document-backed match in **{top['file_name']}**.",
-                    {
-                        "cards": [
-                            {
-                                "id": f"evidence-{top['document_id']}",
-                                "kind": "evidence",
-                                "title": str(top["file_name"]),
-                                "body": str(top["chunk_text"])[:1000],
-                                "meta": [
-                                    {"label": "Score", "value": f"{float(top['score']):.3f}"},
-                                    {"label": "Mode", "value": str(search.get("mode", "search"))},
-                                ],
-                            }
-                        ]
-                    },
-                )
-
-        return (
-            "Tell me what you want to file or upload your tax documents. For example: **File my income tax return for the current year**.",
-            {},
-        )
-
-    def _missing_document_labels(self, documents: list[dict[str, Any]]) -> list[str]:
-        types = {str(document.get("document_type") or "").lower() for document in documents}
-        missing: list[str] = []
-        if not any("form16" in doc_type for doc_type in types):
-            missing.append("Form 16")
-        if not any("ais" in doc_type for doc_type in types):
-            missing.append("AIS")
-        if not any("tis" in doc_type for doc_type in types):
-            missing.append("TIS")
-        return missing
+        We drop any message whose role we don't understand; we do not try to replay tool calls from
+        history (tool_use/tool_result pairs are turn-local). This keeps history simple and durable.
+        """
+        messages = await self.list_messages(thread_id=thread_id, limit=_HISTORY_WINDOW)
+        llm_history: list[dict[str, Any]] = []
+        for entry in messages:
+            role = entry.get("role")
+            content = (entry.get("content") or "").strip()
+            if not content:
+                continue
+            if role == "user":
+                llm_history.append({"role": "user", "content": content})
+            elif role == "agent":
+                llm_history.append({"role": "assistant", "content": content})
+        return llm_history
 
     async def _create_message(
         self,
@@ -184,7 +126,7 @@ class ChatService:
                 role,
                 content,
                 message_type,
-                json.dumps(metadata, sort_keys=True),
+                json.dumps(metadata, sort_keys=True, default=str),
             )
         return self._serialize(row)
 
