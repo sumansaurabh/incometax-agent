@@ -2,6 +2,8 @@
 
 AI copilot for Indian Income Tax e-Filing portal. See docs/ for full plan and architecture.
 
+If you want to run the stack locally, start with the guides in setup/.
+
 ## Runtime Configuration
 
 The backend now exposes explicit env vars for AI-provider wiring, Langfuse-compatible OTLP tracing, and Redis-backed runtime state.

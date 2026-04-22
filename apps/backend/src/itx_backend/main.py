@@ -62,6 +62,9 @@ def create_app() -> FastAPI:
 
     @app.middleware("http")
     async def request_guard(request: Request, call_next):
+        if request.method == "OPTIONS":
+            return await call_next(request)
+
         key = request.client.host if request.client else "unknown"
         if not await limiter.allow(key):
             return JSONResponse(content={"error": "rate_limited"}, status_code=429)
