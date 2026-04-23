@@ -34,6 +34,24 @@ PIPELINE_VERSION = "phase2-doc-intel-1"
 PASSWORD_ATTEMPT_LIMIT = 5
 
 
+def _stringify_table_keys(value: Any) -> Any:
+    """Recursively coerce dict keys to strings for JSON serialization.
+
+    Upstream parsers (notably the table extractor) can emit None as a column header
+    when the source PDF has a truly empty cell. `json.dumps(..., sort_keys=True)`
+    then raises because None and str are not orderable in Python 3. We call this
+    on every payload that embeds parser output before persisting: the extraction
+    row, the normalized_fields jsonb, and any dict-valued entity. The coercion is
+    lossless for downstream readers, which already treat keys as strings.
+    """
+
+    if isinstance(value, dict):
+        return {("" if key is None else str(key)): _stringify_table_keys(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_stringify_table_keys(item) for item in value]
+    return value
+
+
 def _derive_portal_password(pan: Optional[str], dob: Optional[str]) -> Optional[str]:
     """Construct the standard IT portal password from PAN + DOB.
 
@@ -859,7 +877,7 @@ class DocumentService:
                         parsed_document_id,
                         version_no,
                         index,
-                        json.dumps(table_rows, sort_keys=True),
+                        json.dumps(_stringify_table_keys(table_rows), sort_keys=True),
                     )
                 await connection.execute(
                     """
@@ -875,23 +893,25 @@ class DocumentService:
                     processed.get("parsed", {}).get("parser", "unknown"),
                     PIPELINE_VERSION,
                     json.dumps(
-                        {
-                            "classification_confidence": processed.get("classification_confidence"),
-                            "parser_output": processed.get("parsed", {}),
-                            "warnings": processed.get("parsed", {}).get("warnings", []),
-                            "tables": processed.get("tables", []),
-                            "processing_summary": processed.get("processing_summary", {}),
-                        },
+                        _stringify_table_keys(
+                            {
+                                "classification_confidence": processed.get("classification_confidence"),
+                                "parser_output": processed.get("parsed", {}),
+                                "warnings": processed.get("parsed", {}).get("warnings", []),
+                                "tables": processed.get("tables", []),
+                                "processing_summary": processed.get("processing_summary", {}),
+                            }
+                        ),
                         sort_keys=True,
                     ),
-                    json.dumps(normalized_fields, sort_keys=True),
+                    json.dumps(_stringify_table_keys(normalized_fields), sort_keys=True),
                     extraction_confidence,
                 )
 
                 for entity in entities:
                     entity_value = entity.get("value")
                     if isinstance(entity_value, (dict, list)):
-                        entity_value = json.dumps(entity_value, sort_keys=True)
+                        entity_value = json.dumps(_stringify_table_keys(entity_value), sort_keys=True)
                     await connection.execute(
                         """
                         insert into document_entities (
