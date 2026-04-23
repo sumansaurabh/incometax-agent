@@ -112,9 +112,17 @@ async function syncActiveSidePanel(): Promise<TrustStatus> {
   return syncSidePanelForTab(activeTab);
 }
 
+async function syncAllTabs(): Promise<void> {
+  const tabs = await chrome.tabs.query({}).catch(() => []);
+  await Promise.all(tabs.map((tab) => syncSidePanelForTab(tab)));
+}
+
 async function configurePanelBehavior(): Promise<void> {
   try {
-    await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+    // Do NOT auto-open on action click — we only want the panel visible on the
+    // trusted e-Filing portal. `action.onClicked` below opens it explicitly
+    // and only when the active tab passes the trust check.
+    await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false });
   } catch (error) {
     console.warn("side panel behavior setup failed", error);
   }
@@ -171,16 +179,16 @@ export function initRouter(): void {
   };
 
   void connector.connect(forwardBackendMessage);
-  void emitActiveTrustStatus();
+  void syncAllTabs().then(() => emitActiveTrustStatus());
 
   chrome.runtime.onInstalled.addListener(() => {
     void configurePanelBehavior();
-    void emitActiveTrustStatus();
+    void syncAllTabs().then(() => emitActiveTrustStatus());
   });
 
   chrome.runtime.onStartup.addListener(() => {
     void configurePanelBehavior();
-    void emitActiveTrustStatus();
+    void syncAllTabs().then(() => emitActiveTrustStatus());
   });
 
   chrome.action.onClicked.addListener((tab) => {
@@ -191,10 +199,20 @@ export function initRouter(): void {
     });
   });
 
-  chrome.tabs.onActivated.addListener(() => {
-    void emitActiveTrustStatus();
+  chrome.tabs.onActivated.addListener(({ tabId }) => {
+    void (async () => {
+      const tab = await chrome.tabs.get(tabId).catch(() => null);
+      const trust = await syncSidePanelForTab(tab);
+      postRuntimeMessage({ type: "trust_status", payload: trust });
+    })();
   });
-  chrome.tabs.onUpdated.addListener((_tabId, _changeInfo, tab) => {
+  chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
+    // Re-evaluate on URL changes for every tab, not just the active one —
+    // otherwise a background tab that navigates to a non-portal URL keeps the
+    // panel enabled and it reappears when the user switches to it.
+    if (changeInfo.url || changeInfo.status === "complete") {
+      void syncSidePanelForTab(tab);
+    }
     if (tab.active) {
       void emitActiveTrustStatus();
     }

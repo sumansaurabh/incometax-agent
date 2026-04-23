@@ -348,27 +348,18 @@ export default function App(): JSX.Element {
     void saveStoredMessages(session.threadId, messages);
   }, [messages, session?.threadId]);
 
+  const indexedCount = useMemo(
+    () => documents.filter((document) => document.status === "indexed").length,
+    [documents],
+  );
+  const parsedCount = useMemo(
+    () => documents.filter((document) => ["parsed", "indexed"].includes(document.status)).length,
+    [documents],
+  );
+
   const contextualCards = useMemo<ChatCard[]>(() => {
     const cards: ChatCard[] = [];
-    const indexedCount = documents.filter((document) => document.status === "indexed").length;
-    const parsedCount = documents.filter((document) => ["parsed", "indexed"].includes(document.status)).length;
     const pendingApprovals = approvals.filter((approval) => approval.status === "pending");
-
-    if (documents.length > 0) {
-      cards.push({
-        id: "documents-status",
-        kind: "document",
-        title: "Uploaded documents",
-        body: "The agent can search indexed and parsed documents while preparing the return.",
-        meta: [
-          { label: "Uploaded", value: String(documents.length) },
-          { label: "Parsed", value: String(parsedCount) },
-          { label: "Indexed", value: String(indexedCount) },
-          { label: "Facts", value: String(factCount) },
-        ],
-        actions: [{ id: "search-documents", label: "Search documents", variant: "secondary" }],
-      });
-    }
 
     if (fillPlan) {
       cards.push({
@@ -428,7 +419,7 @@ export default function App(): JSX.Element {
     }
 
     return cards;
-  }, [approvals, documents, factCount, fillPlan, regimePreview, supportAssessment]);
+  }, [approvals, fillPlan, regimePreview, supportAssessment]);
 
   const handleLogin = async () => {
     const email = authEmail.trim();
@@ -791,6 +782,13 @@ export default function App(): JSX.Element {
         threadId={session?.threadId}
         trustMessage={trustStatus?.message}
         documentCount={documents.length}
+        parsedCount={parsedCount}
+        indexedCount={indexedCount}
+        factCount={factCount}
+        onSearchDocuments={() => {
+          setSettingsOpen(false);
+          void handleSearchDocuments();
+        }}
         isBusy={isBusy}
         onClose={() => setSettingsOpen(false)}
         onNewConversation={() => void handleNewConversation()}

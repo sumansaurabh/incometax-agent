@@ -8,11 +8,15 @@ type Props = {
   threadId?: string | null;
   trustMessage?: string | null;
   documentCount: number;
+  parsedCount?: number;
+  indexedCount?: number;
+  factCount?: number;
   isBusy: boolean;
   onClose: () => void;
   onNewConversation: () => void;
   onSwitchThread: (threadId: string) => void;
   onSignOut: () => void;
+  onSearchDocuments?: () => void;
 };
 
 export function SettingsDrawer({
@@ -21,11 +25,15 @@ export function SettingsDrawer({
   threadId,
   trustMessage,
   documentCount,
+  parsedCount = 0,
+  indexedCount = 0,
+  factCount = 0,
   isBusy,
   onClose,
   onNewConversation,
   onSwitchThread,
   onSignOut,
+  onSearchDocuments,
 }: Props): JSX.Element | null {
   const [threads, setThreads] = useState<ThreadSummary[]>([]);
   const [loadingThreads, setLoadingThreads] = useState(false);
@@ -64,13 +72,21 @@ export function SettingsDrawer({
           </div>
           <div>
             <dt>Documents</dt>
-            <dd>{documentCount} uploaded</dd>
+            <dd>
+              {documentCount} uploaded · {parsedCount} parsed · {indexedCount} indexed · {factCount} facts
+            </dd>
           </div>
           <div>
             <dt>Consent mode</dt>
             <dd>Pilot auto-allow</dd>
           </div>
         </dl>
+
+        {documentCount > 0 && onSearchDocuments ? (
+          <button className="chat-button secondary" type="button" disabled={isBusy} onClick={onSearchDocuments}>
+            Search documents
+          </button>
+        ) : null}
 
         <div className="thread-picker">
           <p className="thread-picker-label">Switch thread</p>
