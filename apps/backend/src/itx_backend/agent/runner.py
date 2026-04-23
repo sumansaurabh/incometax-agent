@@ -201,7 +201,12 @@ async def run_turn(
             context=context,
         )
     except LLMUnavailable as exc:
-        logger.warning("agent.llm_unavailable", extra={"thread_id": thread_id, "reason": str(exc)})
+        logger.warning(
+            "agent.llm_unavailable reason=%s thread_id=%s",
+            str(exc),
+            thread_id,
+            extra={"thread_id": thread_id, "reason": str(exc)},
+        )
         return {
             "content": (
                 "The assistant is temporarily unavailable. Please try again in a moment; "

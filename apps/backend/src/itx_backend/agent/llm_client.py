@@ -42,6 +42,10 @@ class LLMClient:
         if self._client is not None:
             return self._client
         if not settings.anthropic_api_key:
+            logger.error(
+                "llm.config_missing reason=anthropic_api_key_not_configured",
+                extra={"reason": "anthropic_api_key_not_configured"},
+            )
             raise LLMUnavailable("anthropic_api_key_not_configured")
         try:
             from anthropic import AsyncAnthropic  # type: ignore
@@ -53,6 +57,25 @@ class LLMClient:
         }
         if settings.anthropic_base_url:
             kwargs["base_url"] = settings.anthropic_base_url
+            kwargs["default_headers"] = {"Authorization": settings.anthropic_api_key}
+        key = settings.anthropic_api_key
+        masked = f"{key[:6]}...{key[-4:]}" if len(key) > 10 else "***"
+        base_url_for_log = settings.anthropic_base_url or "https://api.anthropic.com (default)"
+        logger.info(
+            "llm.client_init base_url=%s api_key_masked=%s model=%s model_deep=%s timeout_s=%s",
+            base_url_for_log,
+            masked,
+            settings.agent_model,
+            settings.agent_model_deep,
+            settings.agent_request_timeout_seconds,
+            extra={
+                "base_url": base_url_for_log,
+                "api_key_masked": masked,
+                "model": settings.agent_model,
+                "model_deep": settings.agent_model_deep,
+                "timeout_s": settings.agent_request_timeout_seconds,
+            },
+        )
         self._client = AsyncAnthropic(**kwargs)
         return self._client
 
@@ -108,7 +131,32 @@ class LLMClient:
         try:
             response = await client.messages.create(**request_kwargs)
         except Exception as exc:  # noqa: BLE001 — upstream SDK raises a broad hierarchy
-            logger.warning("llm.error", extra={"error": str(exc), "model": request_kwargs["model"]})
+            status = getattr(exc, "status_code", None)
+            body = None
+            resp = getattr(exc, "response", None)
+            if resp is not None:
+                try:
+                    body = resp.text[:500]
+                except Exception:
+                    body = None
+            base_url_for_log = settings.anthropic_base_url or "default"
+            logger.warning(
+                "llm.error error_type=%s status=%s model=%s base_url=%s msg=%s body=%s",
+                type(exc).__name__,
+                status,
+                request_kwargs["model"],
+                base_url_for_log,
+                str(exc)[:300],
+                body,
+                extra={
+                    "error_type": type(exc).__name__,
+                    "error_msg": str(exc)[:300],
+                    "status_code": status,
+                    "response_body": body,
+                    "model": request_kwargs["model"],
+                    "base_url": base_url_for_log,
+                },
+            )
             raise LLMUnavailable(f"anthropic_call_failed:{type(exc).__name__}") from exc
 
         content_blocks: list[dict[str, Any]] = []
