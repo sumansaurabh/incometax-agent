@@ -3,6 +3,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from itx_backend.agent.checkpointer import checkpointer
 from itx_backend.services.auth_runtime import AuthError, auth_runtime
 from itx_backend.services.chat import chat_service
+from itx_backend.services.viewport_capture import viewport_capture_service
 
 router = APIRouter(tags=["ws"])
 
@@ -30,10 +31,12 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
       },
     }
   )
+  await viewport_capture_service.attach(auth_context.user_id, websocket)
   try:
     while True:
       data = await websocket.receive_json()
-      if data.get("type") == "chat_message":
+      message_type = data.get("type")
+      if message_type == "chat_message":
         payload = data.get("payload") or {}
         thread_id = str(payload.get("thread_id") or payload.get("threadId") or "")
         text = str(payload.get("text") or payload.get("message") or "")
@@ -48,6 +51,11 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         )
         await websocket.send_json({"type": "chat_response", "payload": response["agent_message"]})
         continue
+      if message_type == "capture_viewport_result":
+        await viewport_capture_service.handle_result(data.get("payload") or {})
+        continue
       await websocket.send_json({"type": "echo", "payload": data})
   except WebSocketDisconnect:
     return
+  finally:
+    await viewport_capture_service.detach(auth_context.user_id, websocket)

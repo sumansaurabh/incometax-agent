@@ -7,6 +7,7 @@ individual tool modules directly; it only reads from `tool_registry`.
 When adding a new tool, create a module under this package and add it to the imports below.
 """
 
+from itx_backend.agent.tools import capture_viewport as _capture_viewport  # noqa: F401
 from itx_backend.agent.tools import document_search as _document_search  # noqa: F401
 from itx_backend.agent.tools import extract_facts as _extract_facts  # noqa: F401
 from itx_backend.agent.tools import get_form_schema as _get_form_schema  # noqa: F401

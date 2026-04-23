@@ -15,19 +15,47 @@ export type ValidationError = {
   parsedReason?: string;
 };
 
+export type FocusedField = {
+  selector: string;
+  tag: "input" | "select" | "textarea" | "button" | "other";
+  label: string | null;
+  value: string | null;
+  role: string | null;
+  ariaExpanded: boolean;
+};
+
+export type OpenDropdownOption = {
+  value: string | null;
+  label: string;
+  selected: boolean;
+};
+
+export type OpenDropdown = {
+  triggerSelector: string;
+  label: string | null;
+  options: OpenDropdownOption[];
+};
+
 export type PortalState = {
   page: string;
   fields: Record<string, { value: unknown; fieldKey?: string; label?: string; required?: boolean }>;
   validationErrors: ValidationError[];
+  openDropdown?: OpenDropdown | null;
+  focusedField?: FocusedField | null;
 };
 
 export type PageContextPayload = {
   page: string;
   title: string;
   url: string;
+  route?: string;
+  headings?: string[];
+  focusedField?: FocusedField | null;
+  openDropdown?: OpenDropdown | null;
   fields: DetectedField[];
   validationErrors: ValidationError[];
   portalState: PortalState;
+  capturedAt?: string;
 };
 
 export type FillAction = {

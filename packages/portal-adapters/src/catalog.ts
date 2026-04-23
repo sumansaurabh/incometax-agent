@@ -16,6 +16,7 @@ export const pageCatalog: StaticAdapterDefinition[] = [
     keywords: ["login", "sign in", "authenticate"],
     domSignatures: ["input[type='password']", "input[name='userid']", "input[name='password']"],
     textClues: ["pan", "password", "otp", "captcha"],
+    urlPatterns: [/\/login/i, /\/e-filing-login/i],
     schema: schema([
       ["pan_or_aadhaar", "PAN / Aadhaar", true, "#panOrAadhaar, input[name='pan'], input[name='panNumber'], input[name='userid'], input[name='username'], input[autocomplete='username']", ["user id", "pan", "aadhaar", "pan number"]],
       ["password", "Password", true, "#password, input[name='password'], input[type='password']"],
@@ -27,6 +28,7 @@ export const pageCatalog: StaticAdapterDefinition[] = [
     keywords: ["dashboard", "file income tax return", "your returns"],
     domSignatures: ["button[data-testid='file-return']", "a[href*='file-return']", "button[data-testid='refund-status']"],
     textClues: ["view filed returns", "refund status", "e-file", "pending actions"],
+    urlPatterns: [/\/dashboard(?!\/file)/i, /\/dashboard$/i],
     schema: schema([
       ["start_filing", "File Income Tax Return", false, "a[href*='file-return'], button[data-testid='file-return'], button[aria-label*='file return' i]", ["start filing", "e-file"]],
       ["view_returns", "View Filed Returns", false, "a[href*='filed-returns'], button[data-testid='view-returns']"],
@@ -39,10 +41,11 @@ export const pageCatalog: StaticAdapterDefinition[] = [
     keywords: ["file return start", "file income tax return", "assessment year"],
     domSignatures: ["select[name='assessment_year']", "select[name='filing_type']", "select[name='filing_mode']"],
     textClues: ["assessment year", "filing type", "mode of filing"],
+    urlPatterns: [/fileIncomeTaxReturn/i, /\/file-return(\/|$)/i],
     schema: schema([
-      ["assessment_year", "Assessment Year", true, "select[name='assessment_year'], select[name='assessmentYear'], #assessmentYear", ["ay"]],
-      ["filing_type", "Filing Type", true, "select[name='filing_type'], select[name='filingType'], #filingType", ["return type"]],
-      ["filing_mode", "Filing Mode", true, "select[name='filing_mode'], select[name='filingMode'], #filingMode", ["mode of filing"]],
+      ["assessment_year", "Assessment Year", true, "select[name='assessment_year'], select[name='assessmentYear'], #assessmentYear, mat-select[formcontrolname='assessmentYear'], mat-select[aria-label*='assessment year' i]", ["ay"]],
+      ["filing_type", "Filing Type", true, "select[name='filing_type'], select[name='filingType'], #filingType, mat-select[formcontrolname='filingType'], mat-select[aria-label*='filing type' i]", ["return type"]],
+      ["filing_mode", "Filing Mode", true, "select[name='filing_mode'], select[name='filingMode'], #filingMode, mat-select[formcontrolname='filingMode'], mat-select[aria-label*='filing mode' i]", ["mode of filing"]],
     ]),
   },
   {

@@ -1,6 +1,5 @@
 import { executeActionBatch } from "./actions";
-import { readField } from "./actions/read";
-import { detectPage } from "./page-detector";
+import { PageObserver, PageSnapshot } from "./observer";
 
 const LAUNCHER_ID = "itx-sidepanel-launcher";
 const LAUNCHER_BASE_TRANSFORM = "translateY(-50%)";
@@ -108,51 +107,28 @@ function ensureLauncherButton(): void {
   document.body.appendChild(button);
 }
 
-function buildPageContext(): {
-  page: string;
-  title: string;
-  url: string;
-  fields: unknown;
-  validationErrors: unknown;
-  portalState: {
-    page: string;
-    fields: Record<string, { value: string | null; fieldKey: string; label: string; required: boolean }>;
-    validationErrors: unknown;
-  };
-} {
-  const context = detectPage(document);
-  const portalFields = Object.fromEntries(
-    context.fields
-      .filter((field) => Boolean(field.selectorHint))
-      .map((field) => [
-        field.selectorHint as string,
-        {
-          value: readField(field.selectorHint as string),
-          fieldKey: field.key,
-          label: field.label,
-          required: field.required,
-        },
-      ])
-  );
+const observer = new PageObserver();
+observer.start();
 
-  return {
-    page: context.page,
-    title: document.title,
-    url: window.location.href,
-    fields: context.fields,
-    validationErrors: context.validationErrors,
-    portalState: {
-      page: context.page,
-      fields: portalFields,
-      validationErrors: context.validationErrors,
-    },
-  };
+function currentSnapshot(): PageSnapshot {
+  return observer.snapshot();
 }
 
-chrome.runtime.sendMessage({
-  type: "page_detected",
-  payload: buildPageContext(),
-});
+function postSnapshot(snapshot: PageSnapshot): void {
+  chrome.runtime.sendMessage(
+    {
+      type: "page_detected",
+      payload: snapshot,
+    },
+    () => {
+      // Swallow runtime errors — the service worker may be idle; the next snapshot retries.
+      void chrome.runtime.lastError;
+    }
+  );
+}
+
+observer.subscribe((snapshot) => postSnapshot(snapshot));
+postSnapshot(currentSnapshot());
 
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", () => ensureLauncherButton(), { once: true });
@@ -168,7 +144,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           ok: true,
           payload: {
             ...result,
-            pageContext: buildPageContext(),
+            pageContext: currentSnapshot(),
           },
         });
       })
@@ -182,7 +158,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message?.type === "snapshot_page_context") {
-    sendResponse({ ok: true, payload: buildPageContext() });
+    sendResponse({ ok: true, payload: currentSnapshot() });
   }
 
   return false;

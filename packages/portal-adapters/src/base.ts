@@ -24,9 +24,18 @@ export type StaticAdapterDefinition = {
   schema: FieldSchema[];
   domSignatures?: string[];
   textClues?: string[];
+  /**
+   * Regex patterns matched against `document.location.pathname + hash`. A single match
+   * contributes URL_PATTERN_SCORE — enough on its own to push an adapter above
+   * MIN_ADAPTER_SCORE even when the SPA has not yet rendered form fields with stable
+   * names. This is the knob that prevents the old "unknown page" sinkhole for hash-routed
+   * SPA pages like /dashboard/fileIncomeTaxReturn.
+   */
+  urlPatterns?: RegExp[];
 };
 
 export const MIN_ADAPTER_SCORE = 8;
+export const URL_PATTERN_SCORE = 12;
 
 function normalize(value: string): string {
   return value
@@ -206,6 +215,15 @@ function adapterScore(doc: Document, definition: StaticAdapterDefinition): numbe
   score += matchCount(title, definition.keywords) * 5;
   score += matchCount(url, definition.keywords) * 4;
   score += matchCount(body, definition.keywords) * 2;
+
+  if (definition.urlPatterns?.length) {
+    const routeSource = `${doc.location.pathname}${doc.location.hash}${doc.location.search}`;
+    for (const pattern of definition.urlPatterns) {
+      if (pattern.test(routeSource)) {
+        score += URL_PATTERN_SCORE;
+      }
+    }
+  }
 
   if (definition.textClues?.length) {
     score += matchCount(body, definition.textClues) * 2;

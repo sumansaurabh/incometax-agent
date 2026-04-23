@@ -131,6 +131,7 @@ class PortalContextService:
             "pageTitle": "page_title",
             "pageType": "page_type",
             "focusedField": "focused_field",
+            "openDropdown": "open_dropdown",
             "validationErrors": "errors",
         }
         for src, dst in alias_map.items():

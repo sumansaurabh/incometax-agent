@@ -1,4 +1,4 @@
-import { runApprovedActionBatch, snapshotPageContext } from "./action-runner";
+import { captureVisibleViewport, runApprovedActionBatch, snapshotPageContext, ViewportCapture } from "./action-runner";
 import { BackendConnector } from "./connector";
 
 const connector = new BackendConnector();
@@ -145,6 +145,16 @@ async function getTrustedActiveTabId(): Promise<number> {
   return activeTab.id;
 }
 
+async function captureTrustedActiveViewport(): Promise<ViewportCapture> {
+  const activeTab = await getActiveTab();
+  const trust = classifyTrust(activeTab.url);
+  if (!trust.canOperate) {
+    throw new Error(`trust_denied:${trust.status}`);
+  }
+  const windowId = typeof activeTab.windowId === "number" ? activeTab.windowId : chrome.windows.WINDOW_ID_CURRENT;
+  return captureVisibleViewport(windowId, activeTab);
+}
+
 async function emitActiveTrustStatus(): Promise<void> {
   postRuntimeMessage({
     type: "trust_status",
@@ -164,6 +174,35 @@ export function initRouter(): void {
         connector.send({
           type: "action_batch_result",
           payload: {
+            ok: false,
+            error: error instanceof Error ? error.message : "unknown_error",
+          },
+        });
+      });
+      return;
+    }
+
+    if (message.type === "capture_viewport_request") {
+      const requestId = (message.payload as { request_id?: string } | undefined)?.request_id ?? "";
+      void (async () => {
+        const capture = await captureTrustedActiveViewport();
+        connector.send({
+          type: "capture_viewport_result",
+          payload: {
+            request_id: requestId,
+            ok: true,
+            media_type: capture.mediaType,
+            data_base64: capture.dataBase64,
+            size_bytes: capture.sizeBytes,
+            viewport: capture.viewport,
+            captured_at: capture.capturedAt,
+          },
+        });
+      })().catch((error: unknown) => {
+        connector.send({
+          type: "capture_viewport_result",
+          payload: {
+            request_id: requestId,
             ok: false,
             error: error instanceof Error ? error.message : "unknown_error",
           },
@@ -238,6 +277,28 @@ export function initRouter(): void {
         const tabId = msg.payload?.tabId ?? await getTrustedActiveTabId();
         const result = await runApprovedActionBatch(msg.payload?.actions ?? [], tabId);
         sendResponse(result);
+      })().catch((error: unknown) => {
+        sendResponse({
+          ok: false,
+          error: error instanceof Error ? error.message : "unknown_error",
+        });
+      });
+      return true;
+    }
+
+    if (msg?.type === "capture_viewport") {
+      void (async () => {
+        const capture = await captureTrustedActiveViewport();
+        sendResponse({
+          ok: true,
+          payload: {
+            media_type: capture.mediaType,
+            data_base64: capture.dataBase64,
+            size_bytes: capture.sizeBytes,
+            viewport: capture.viewport,
+            captured_at: capture.capturedAt,
+          },
+        });
       })().catch((error: unknown) => {
         sendResponse({
           ok: false,

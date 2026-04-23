@@ -512,12 +512,29 @@ export default function App(): JSX.Element {
     appendMessages([userMessage]);
     setIsTyping(true);
     try {
+      // Refresh the page snapshot when it is either missing or older than 5 seconds. The agent
+      // decides what to answer based on the snapshot it receives with the user message, so a
+      // stale snapshot (user navigated, opened a dropdown, etc.) produces confidently-wrong
+      // answers. Freshness check is cheap — the content script keeps the snapshot warm.
+      const STALE_MS = 5_000;
+      const capturedAtMs = pageContext?.capturedAt ? Date.parse(pageContext.capturedAt) : 0;
+      const isStale = !pageContext || Number.isNaN(capturedAtMs) || Date.now() - capturedAtMs > STALE_MS;
+      const freshContext = isStale ? (await refreshSnapshot()) ?? pageContext : pageContext;
+
       const result = await sendChatMessage({
         threadId: session.threadId,
         message: text,
         context: {
-          page: pageContext?.page ?? "unknown",
-          portal_state: pageContext?.portalState ?? null,
+          page: freshContext?.page ?? "unknown",
+          current_url: freshContext?.url ?? null,
+          page_title: freshContext?.title ?? null,
+          page_type: freshContext?.page ?? "unknown",
+          route: freshContext?.route ?? null,
+          headings: freshContext?.headings ?? [],
+          focused_field: freshContext?.focusedField ?? null,
+          open_dropdown: freshContext?.openDropdown ?? null,
+          portal_state: freshContext?.portalState ?? null,
+          captured_at: freshContext?.capturedAt ?? null,
           pilot_mode: PILOT_MODE,
         },
       });

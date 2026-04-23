@@ -106,14 +106,14 @@ class AgentRunner:
                         # Surface the tool's raw result so the chat layer can extract structured
                         # payloads (e.g. propose_fill proposals) without re-executing the tool.
                         # Keep it best-effort — some results are large, but the chat service trims.
-                        "result": result_payload,
+                        "result": self._scrub_tool_result_for_log(result_payload),
                     }
                 )
                 tool_result_blocks.append(
                     {
                         "type": "tool_result",
                         "tool_use_id": tool_use_id,
-                        "content": json.dumps(result_payload, default=str),
+                        "content": self._format_tool_result_content(result_payload),
                         "is_error": is_error,
                     }
                 )
@@ -171,6 +171,42 @@ class AgentRunner:
     def _extract_text(self, content_blocks: list[dict[str, Any]]) -> str:
         parts = [block.get("text", "") for block in content_blocks if block.get("type") == "text"]
         return "\n\n".join(part for part in parts if part).strip()
+
+    def _scrub_tool_result_for_log(self, payload: Any) -> Any:
+        """Drop inline base64 image bytes from a tool result before logging.
+
+        The `image.source.data` field can be hundreds of KB and has zero debugging value — the
+        capture is re-obtainable on demand. Everything else (reason, captured_at, viewport,
+        size_bytes) stays.
+        """
+        if not isinstance(payload, dict):
+            return payload
+        image = payload.get("image")
+        if isinstance(image, dict) and isinstance(image.get("source"), dict):
+            scrubbed_image = dict(image)
+            scrubbed_source = dict(image["source"])
+            if "data" in scrubbed_source:
+                scrubbed_source["data"] = "<elided>"
+            scrubbed_image["source"] = scrubbed_source
+            payload = {**payload, "image": scrubbed_image}
+        return payload
+
+    def _format_tool_result_content(self, payload: Any) -> Any:
+        """Return either a JSON string (default) or a content-block list when the tool
+        surfaced an image.
+
+        Anthropic tool_result `content` may be a string OR a list of blocks. Only when we have
+        a real image do we use the list form, because emitting a list means the model has to
+        re-parse structure — for text-only tools, a single JSON string is cheaper.
+        """
+        if isinstance(payload, dict) and isinstance(payload.get("image"), dict) and payload["image"].get("type") == "image":
+            image_block = payload["image"]
+            sidecar = {k: v for k, v in payload.items() if k != "image"}
+            blocks: list[dict[str, Any]] = [image_block]
+            if sidecar:
+                blocks.append({"type": "text", "text": json.dumps(sidecar, default=str)})
+            return blocks
+        return json.dumps(payload, default=str)
 
     def _accumulate_usage(self, totals: dict[str, int], delta: dict[str, Any]) -> None:
         for key, value in delta.items():

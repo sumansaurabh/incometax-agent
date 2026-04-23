@@ -100,6 +100,31 @@ ONBOARDING_CONSENT_DEFINITIONS: dict[str, dict[str, Any]] = {
         ),
         "scope": {"sharing": ["offline_json", "artifact_export", "evidence_bundle"]},
     },
+    "screen_capture": {
+        "title": "Allow on-demand screen capture of the portal tab",
+        "required": False,
+        "category": "filing",
+        "description": (
+            "Optional. Let the agent capture a JPEG screenshot of the currently visible portion of "
+            "the official e-Filing portal tab when — and only when — it asks for one to answer a "
+            "visual question (e.g. reading a chart, a captcha image, or a rendered PDF preview). "
+            "Each capture is triggered by an explicit agent tool call and is scoped to the active "
+            "trusted portal tab."
+        ),
+        "consent_text": (
+            "I allow this filing thread to capture on-demand JPEG screenshots of the visible "
+            "portion of the active official e-Filing portal tab when the agent needs to answer a "
+            "visual question that cannot be answered from the DOM alone."
+        ),
+        "scope": {
+            "capture": {
+                "format": "jpeg",
+                "region": "viewport",
+                "trigger": "agent_tool_call",
+                "tabs": "trusted_e_filing_only",
+            }
+        },
+    },
     "everify_portal_handoff": {
         "title": "Allow e-verify portal handoff",
         "required": False,
