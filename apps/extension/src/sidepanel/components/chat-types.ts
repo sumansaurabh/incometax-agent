@@ -11,11 +11,22 @@ export type ChatCardAction = {
 
 export type ChatCard = {
   id: string;
-  kind: "welcome" | "document" | "evidence" | "approval" | "action" | "summary" | "error";
+  kind: "welcome" | "document" | "evidence" | "approval" | "action" | "summary" | "error" | "password_prompt";
   title: string;
   body?: string;
   meta?: Array<{ label: string; value: string }>;
   actions?: ChatCardAction[];
+  /**
+   * Populated only when kind === "password_prompt". The card renders a masked password
+   * input (plus optional PAN+DOB helper); submitting it calls the unlock endpoint
+   * against every document ID listed here.
+   */
+  passwordPrompt?: {
+    documentIds: string[];
+    attemptsRemaining: number;
+    hint?: string;
+    encryptionKind: "pdf" | "ais_json";
+  };
 };
 
 export type ChatMessage = {

@@ -17,6 +17,7 @@ from itx_backend.agent.tools import portal_context as _portal_context  # noqa: F
 from itx_backend.agent.tools import portal_nav as _portal_nav  # noqa: F401
 from itx_backend.agent.tools import propose_fill as _propose_fill  # noqa: F401
 from itx_backend.agent.tools import read_portal_field as _read_portal_field  # noqa: F401
+from itx_backend.agent.tools import resolve_document_password as _resolve_document_password  # noqa: F401
 from itx_backend.agent.tools import tax_calc as _tax_calc  # noqa: F401
 from itx_backend.agent.tools import web_search as _web_search  # noqa: F401
 

@@ -14,6 +14,14 @@ type ProposalDecisionInput = {
   reason?: string;
 };
 
+type PasswordSubmit = (input: {
+  cardId: string;
+  documentIds: string[];
+  password: string;
+  pan?: string;
+  dob?: string;
+}) => Promise<void> | void;
+
 type Props = {
   messages: ChatMessage[];
   contextualCards: ChatCard[];
@@ -24,6 +32,7 @@ type Props = {
   onAction: (actionId: string) => void;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   onProposalDecision?: (input: ProposalDecisionInput) => Promise<any>;
+  onSubmitPassword?: PasswordSubmit;
 };
 
 function dateKey(iso: string): string {
@@ -39,6 +48,7 @@ export function ChatPane({
   onFilesSelected,
   onAction,
   onProposalDecision,
+  onSubmitPassword,
 }: Props): JSX.Element {
   const listRef = useRef<HTMLDivElement | null>(null);
   const [showJump, setShowJump] = useState(false);
@@ -73,13 +83,23 @@ export function ChatPane({
           {groupedMessages.map(({ message, showDate }) => (
             <React.Fragment key={message.id}>
               {showDate ? <div className="date-divider">{dateKey(message.createdAt)}</div> : null}
-              <ChatBubble message={message} onCardAction={onAction} onProposalDecision={onProposalDecision} />
+              <ChatBubble
+                message={message}
+                onCardAction={onAction}
+                onProposalDecision={onProposalDecision}
+                onSubmitPassword={onSubmitPassword}
+              />
             </React.Fragment>
           ))}
           {contextualCards.length ? (
             <div className="context-card-stack">
               {contextualCards.map((card) => (
-                <MessageCard key={card.id} card={card} onAction={onAction} />
+                <MessageCard
+                  key={card.id}
+                  card={card}
+                  onAction={onAction}
+                  onSubmitPassword={onSubmitPassword}
+                />
               ))}
             </div>
           ) : null}

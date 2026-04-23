@@ -51,6 +51,19 @@ class DocumentSearchRequest(BaseModel):
     doc_types: Optional[list[str]] = None
 
 
+class DocumentUnlockRequest(BaseModel):
+    password: str
+    pan: Optional[str] = None
+    dob: Optional[str] = None
+
+
+class DocumentUnlockBatchRequest(BaseModel):
+    thread_id: str
+    password: str
+    pan: Optional[str] = None
+    dob: Optional[str] = None
+
+
 async def _require_document_access(document_id: str) -> str:
     thread_id = await document_service.get_document_thread_id(document_id)
     if thread_id is None:
@@ -188,3 +201,37 @@ async def search_thread_documents(payload: DocumentSearchRequest) -> dict[str, o
 async def embedding_health() -> dict[str, object]:
     get_request_auth(required=True)
     return await document_service.embedding_health()
+
+
+@router.post("/{document_id}/unlock")
+async def unlock_document(document_id: str, payload: DocumentUnlockRequest) -> dict[str, Any]:
+    await _require_document_access(document_id)
+    if not payload.password:
+        raise HTTPException(status_code=400, detail="password_required")
+    profile = {k: v for k, v in {"pan": payload.pan, "dob": payload.dob}.items() if v}
+    try:
+        return await document_service.unlock_document(
+            document_id=document_id,
+            password=payload.password,
+            persist_profile=profile or None,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="document_not_found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/unlock-batch")
+async def unlock_documents_batch(payload: DocumentUnlockBatchRequest) -> dict[str, Any]:
+    await require_thread_state(payload.thread_id)
+    if not payload.password:
+        raise HTTPException(status_code=400, detail="password_required")
+    profile = {k: v for k, v in {"pan": payload.pan, "dob": payload.dob}.items() if v}
+    try:
+        return await document_service.unlock_documents_for_thread(
+            thread_id=payload.thread_id,
+            password=payload.password,
+            persist_profile=profile or None,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

@@ -84,6 +84,122 @@ def extract_text_from_image_bytes(content: bytes) -> str:
     return _run_tesseract(content)
 
 
+class PasswordRequiredError(Exception):
+    """Raised when a file cannot be parsed because it is password-protected.
+
+    The caller (pipeline → service → API) maps this to status=awaiting_password
+    and surfaces a prompt to the user instead of treating it as a parse failure.
+    """
+
+    def __init__(self, kind: str, *, hint: Optional[str] = None) -> None:
+        super().__init__(f"password_required:{kind}")
+        self.kind = kind
+        self.hint = hint
+
+
+def detect_pdf_encryption(content: bytes) -> bool:
+    try:
+        from pypdf import PdfReader
+    except Exception:
+        # If pypdf is unavailable we fall through to byte-level sniff below.
+        pass
+    else:
+        try:
+            reader = PdfReader(io.BytesIO(content))
+            return bool(reader.is_encrypted)
+        except Exception:
+            pass
+    # Byte-level fallback — the /Encrypt dictionary key is only present on encrypted PDFs.
+    return b"/Encrypt" in content[:65536]
+
+
+def decrypt_pdf_bytes(content: bytes, password: str) -> Optional[bytes]:
+    """Attempt to decrypt a PDF in-memory and return a new plaintext PDF byte string.
+
+    Returns None when the password does not match. Raises ImportError only when both
+    pypdf and PyMuPDF are unavailable.
+    """
+
+    try:
+        from pypdf import PdfReader, PdfWriter
+    except Exception:
+        PdfReader = None  # type: ignore[assignment]
+        PdfWriter = None  # type: ignore[assignment]
+
+    if PdfReader is not None and PdfWriter is not None:
+        try:
+            reader = PdfReader(io.BytesIO(content))
+        except Exception:
+            reader = None  # type: ignore[assignment]
+        if reader is not None:
+            if not reader.is_encrypted:
+                return content
+            try:
+                outcome = reader.decrypt(password)
+            except Exception:
+                outcome = 0
+            # pypdf returns an int enum: 0 = failed, 1 = user-pw match, 2 = owner-pw match.
+            if outcome in (1, 2):
+                writer = PdfWriter()
+                for page in reader.pages:
+                    writer.add_page(page)
+                buffer = io.BytesIO()
+                writer.write(buffer)
+                return buffer.getvalue()
+            # Fall through to PyMuPDF in case pypdf failed for format-specific reasons.
+
+    try:
+        import fitz  # PyMuPDF
+    except Exception:
+        return None
+
+    try:
+        document = fitz.open(stream=content, filetype="pdf")
+    except Exception:
+        return None
+
+    try:
+        if document.needs_pass:
+            if not document.authenticate(password):
+                return None
+        buffer = io.BytesIO()
+        document.save(buffer)
+        return buffer.getvalue()
+    finally:
+        document.close()
+
+
+def _looks_like_encrypted_ais_json(content: bytes, file_name: str) -> bool:
+    """AIS/TIS JSON downloaded from the IT portal is shipped encrypted.
+
+    The container format is `<64 hex chars><base64 ciphertext>`. We detect this by
+    (a) filename heuristic and (b) verifying the byte signature rather than trying to
+    decrypt — decryption itself is not supported yet; see docs in decrypt_json_bytes.
+    """
+
+    normalized = file_name.lower()
+    if not any(marker in normalized for marker in ("ais", "tis")):
+        return False
+    if not normalized.endswith(".json"):
+        return False
+    stripped = content.strip()
+    if len(stripped) < 80:
+        return False
+    header = stripped[:64]
+    try:
+        header.decode("ascii")
+    except UnicodeDecodeError:
+        return False
+    if not re.fullmatch(rb"[0-9a-fA-F]{64}", header):
+        return False
+    # If the whole payload parses as JSON then it's not the encrypted container.
+    try:
+        json.loads(stripped)
+        return False
+    except Exception:
+        return True
+
+
 def _extract_pdf_pages_with_pypdf(content: bytes) -> list[dict[str, Any]]:
     try:
         from pypdf import PdfReader
@@ -94,6 +210,9 @@ def _extract_pdf_pages_with_pypdf(content: bytes) -> list[dict[str, Any]]:
         reader = PdfReader(io.BytesIO(content))
     except Exception:
         return []
+
+    if reader.is_encrypted:
+        raise PasswordRequiredError("pdf")
 
     pages: list[dict[str, Any]] = []
     for index, page in enumerate(reader.pages, start=1):
@@ -122,6 +241,10 @@ def _extract_pdf_pages_with_pymupdf(content: bytes, *, render_ocr: bool, prefer_
         document = fitz.open(stream=content, filetype="pdf")
     except Exception:
         return []
+
+    if getattr(document, "needs_pass", False):
+        document.close()
+        raise PasswordRequiredError("pdf")
 
     pages: list[dict[str, Any]] = []
     for index, page in enumerate(document, start=1):
@@ -158,6 +281,11 @@ def _extract_pdf_pages_with_pymupdf(content: bytes, *, render_ocr: bool, prefer_
 
 
 def extract_pdf_pages_from_bytes(content: bytes, *, render_ocr: bool = True) -> list[dict[str, Any]]:
+    # Fail fast on encrypted PDFs so the caller can request a password instead of
+    # returning an empty extraction that would look like a generic parse failure.
+    if detect_pdf_encryption(content):
+        raise PasswordRequiredError("pdf")
+
     image_heavy = content.count(b"/Subtype/Image") > 0 or content.count(b"/Image") > 2
     if render_ocr and image_heavy:
         pages = _extract_pdf_pages_with_pymupdf(content, render_ocr=True, prefer_ocr=True)

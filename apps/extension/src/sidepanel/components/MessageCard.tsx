@@ -1,13 +1,26 @@
 import React from "react";
 
 import { ChatCard } from "./chat-types";
+import { PasswordPromptCard } from "./PasswordPromptCard";
+
+type PasswordSubmit = (input: {
+  cardId: string;
+  documentIds: string[];
+  password: string;
+  pan?: string;
+  dob?: string;
+}) => Promise<void> | void;
 
 type Props = {
   card: ChatCard;
   onAction: (actionId: string) => void;
+  onSubmitPassword?: PasswordSubmit;
 };
 
-export function MessageCard({ card, onAction }: Props): JSX.Element {
+export function MessageCard({ card, onAction, onSubmitPassword }: Props): JSX.Element {
+  if (card.kind === "password_prompt" && card.passwordPrompt && onSubmitPassword) {
+    return <PasswordPromptCard card={card} onSubmitPassword={onSubmitPassword} />;
+  }
   return (
     <article className={`message-card message-card-${card.kind}`}>
       <div className="message-card-header">

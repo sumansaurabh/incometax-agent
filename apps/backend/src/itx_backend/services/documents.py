@@ -15,7 +15,12 @@ from itx_backend.agent.nodes import document_intake, extract_facts, infer_itr, r
 from itx_backend.config import settings
 from itx_backend.db.session import get_pool
 from itx_backend.services.document_storage import document_storage
-from itx_workers.parsers.common import decode_text_bytes
+from itx_workers.parsers.common import (
+    PasswordRequiredError,
+    decode_text_bytes,
+    decrypt_pdf_bytes,
+    detect_pdf_encryption,
+)
 from itx_workers.document_pipeline import process_document
 from itx_workers.queue import QueueJob, drain, enqueue
 from itx_workers.security.sanitize import analyze_text_security, sanitize_text
@@ -23,6 +28,36 @@ from itx_workers.security.virus_scan import scan as virus_scan
 
 
 PIPELINE_VERSION = "phase2-doc-intel-1"
+
+# Password prompts are rate-limited per-document to prevent the unlock endpoint
+# from being used as an online brute-force oracle against a captured blob.
+PASSWORD_ATTEMPT_LIMIT = 5
+
+
+def _derive_portal_password(pan: Optional[str], dob: Optional[str]) -> Optional[str]:
+    """Construct the standard IT portal password from PAN + DOB.
+
+    Format is `<pan_lowercase><DDMMYYYY>`. DOB arrives in various shapes — keep it
+    permissive. Returns None when either piece is missing or malformed.
+    """
+
+    if not pan or not dob:
+        return None
+    pan_lower = str(pan).strip().lower()
+    if not re.fullmatch(r"[a-z]{5}[0-9]{4}[a-z]", pan_lower):
+        return None
+    dob_str = str(dob).strip()
+    digits = re.sub(r"\D", "", dob_str)
+    # Accept DDMMYYYY directly, or ISO YYYY-MM-DD, or DD/MM/YYYY — all collapse to digits.
+    if len(digits) == 8 and digits[:4].isdigit():
+        # Ambiguous: could be DDMMYYYY or YYYYMMDD. Disambiguate by year plausibility.
+        leading_year = int(digits[:4])
+        trailing_year = int(digits[4:])
+        if 1900 <= leading_year <= 2100 and not (1900 <= trailing_year <= 2100):
+            digits = digits[6:8] + digits[4:6] + digits[:4]
+    if len(digits) != 8:
+        return None
+    return f"{pan_lower}{digits}"
 
 
 class DocumentService:
@@ -247,7 +282,30 @@ class DocumentService:
             "security": security,
         }
         if process_immediately:
-            response.update(await self._process_job(job))
+            try:
+                response.update(await self._process_job(job))
+            except PasswordRequiredError as exc:
+                auto = await self._try_auto_unlock(
+                    document_id=document_id,
+                    version_no=version_no,
+                    storage_uri=storage_uri,
+                    thread_id=effective_thread_id,
+                    doc_type=effective_doc_type,
+                    kind=exc.kind,
+                )
+                if auto is not None:
+                    response.update(auto)
+                    return response
+                response.update(
+                    await self._mark_awaiting_password(
+                        document_id=document_id,
+                        thread_id=effective_thread_id,
+                        doc_type=effective_doc_type,
+                        version_no=version_no,
+                        kind=exc.kind,
+                        hint=exc.hint,
+                    )
+                )
             return response
 
         job = await enqueue(job)
@@ -946,6 +1004,309 @@ class DocumentService:
             "embedding_index": embedding_index,
             "attached_thread": attached_summary,
         }
+
+    async def _mark_awaiting_password(
+        self,
+        *,
+        document_id: str,
+        thread_id: Optional[str],
+        doc_type: str,
+        version_no: int,
+        kind: str,
+        hint: Optional[str],
+    ) -> dict[str, Any]:
+        parsed_document_id = uuid.UUID(document_id)
+        pool = await get_pool()
+        async with pool.acquire() as connection:
+            await connection.execute(
+                """
+                update documents
+                set status = 'awaiting_password',
+                    password_hint = $2,
+                    updated_at = now()
+                where id = $1
+                """,
+                parsed_document_id,
+                hint,
+            )
+            await connection.execute(
+                """
+                insert into document_password_attempts (document_id, attempt_count)
+                values ($1, 0)
+                on conflict (document_id) do nothing
+                """,
+                parsed_document_id,
+            )
+            attempts = await connection.fetchval(
+                "select attempt_count from document_password_attempts where document_id = $1",
+                parsed_document_id,
+            )
+
+        return {
+            "document_id": document_id,
+            "thread_id": thread_id,
+            "status": "awaiting_password",
+            "document_type": doc_type,
+            "encryption_kind": kind,
+            "password_hint": hint,
+            "attempts_remaining": max(PASSWORD_ATTEMPT_LIMIT - int(attempts or 0), 0),
+            "version_no": version_no,
+        }
+
+    async def _try_auto_unlock(
+        self,
+        *,
+        document_id: str,
+        version_no: int,
+        storage_uri: str,
+        thread_id: Optional[str],
+        doc_type: str,
+        kind: str,
+    ) -> Optional[dict[str, Any]]:
+        """If the thread already has PAN+DOB, try the derived password before prompting.
+
+        Returns the processed-job result on success, or None so the caller falls through
+        to prompting the user. JSON variants are not auto-unlocked — we do not decrypt
+        them yet and must surface the 'upload AIS PDF instead' hint.
+        """
+
+        if kind != "pdf" or not thread_id:
+            return None
+        state = await checkpointer.latest(thread_id)
+        if state is None:
+            return None
+        tax_facts = state.tax_facts or {}
+        password = _derive_portal_password(tax_facts.get("pan"), tax_facts.get("dob"))
+        if not password:
+            return None
+        return await self._apply_password(
+            document_id=document_id,
+            version_no=version_no,
+            storage_uri=storage_uri,
+            thread_id=thread_id,
+            doc_type=doc_type,
+            password=password,
+            record_attempt=False,
+        )
+
+    async def _apply_password(
+        self,
+        *,
+        document_id: str,
+        version_no: int,
+        storage_uri: str,
+        thread_id: Optional[str],
+        doc_type: str,
+        password: str,
+        record_attempt: bool,
+    ) -> Optional[dict[str, Any]]:
+        """Decrypt the stored bytes in place and re-run the pipeline.
+
+        Returns the processed result on success, None on wrong-password.
+        """
+
+        encrypted_bytes = document_storage.read(storage_uri)
+        if not detect_pdf_encryption(encrypted_bytes):
+            # Already decrypted (e.g. race with another unlock call) — just reprocess.
+            decrypted = encrypted_bytes
+        else:
+            decrypted = decrypt_pdf_bytes(encrypted_bytes, password)
+            if decrypted is None:
+                return None
+
+        # Overwrite stored bytes with the decrypted copy so subsequent reads and
+        # the hybrid retriever see plaintext. Chunk content in DB follows the pipeline.
+        document_storage.write(storage_uri, decrypted)
+
+        parsed_document_id = uuid.UUID(document_id)
+        sha256 = hashlib.sha256(decrypted).hexdigest()
+        pool = await get_pool()
+        async with pool.acquire() as connection:
+            await connection.execute(
+                """
+                update documents
+                set sha256 = $2,
+                    byte_size = $3,
+                    status = 'uploaded',
+                    password_hint = null,
+                    updated_at = now()
+                where id = $1
+                """,
+                parsed_document_id,
+                sha256,
+                len(decrypted),
+            )
+            await connection.execute(
+                "update document_versions set sha256 = $3 where document_id = $1 and version_no = $2",
+                parsed_document_id,
+                version_no,
+                sha256,
+            )
+            if record_attempt:
+                await connection.execute(
+                    """
+                    update document_password_attempts
+                    set attempt_count = 0, last_attempt_at = now(), updated_at = now()
+                    where document_id = $1
+                    """,
+                    parsed_document_id,
+                )
+
+        job = QueueJob(
+            document_id=document_id,
+            thread_id=thread_id,
+            doc_type=doc_type,
+            payload={
+                "version_no": version_no,
+                "storage_uri": storage_uri,
+                "sanitized": True,
+                "virus_scan": "clean",
+                "security": {"prompt_injection_risk": "low", "findings": []},
+                "unlocked": True,
+            },
+        )
+        return await self._process_job(job)
+
+    async def unlock_document(
+        self,
+        *,
+        document_id: str,
+        password: str,
+        persist_profile: Optional[dict[str, str]] = None,
+    ) -> dict[str, Any]:
+        parsed_document_id = uuid.UUID(document_id)
+        pool = await get_pool()
+        async with pool.acquire() as connection:
+            row = await connection.fetchrow(
+                """
+                select d.id, d.thread_id, d.doc_type, d.status,
+                       dv.version_no, dv.storage_uri
+                from documents d
+                join document_versions dv on dv.document_id = d.id
+                where d.id = $1
+                order by dv.version_no desc
+                limit 1
+                """,
+                parsed_document_id,
+            )
+        if row is None:
+            raise KeyError(document_id)
+
+        attempts = await self._get_attempt_count(parsed_document_id)
+        if attempts >= PASSWORD_ATTEMPT_LIMIT:
+            return {
+                "document_id": document_id,
+                "status": "password_attempts_exhausted",
+                "attempts_remaining": 0,
+            }
+
+        result = await self._apply_password(
+            document_id=document_id,
+            version_no=int(row["version_no"]),
+            storage_uri=row["storage_uri"],
+            thread_id=row["thread_id"],
+            doc_type=row["doc_type"] or "unknown",
+            password=password,
+            record_attempt=True,
+        )
+        if result is None:
+            new_count = await self._bump_attempt_count(parsed_document_id)
+            remaining = max(PASSWORD_ATTEMPT_LIMIT - new_count, 0)
+            if remaining == 0:
+                async with pool.acquire() as connection:
+                    await connection.execute(
+                        "update documents set status = 'password_attempts_exhausted', updated_at = now() where id = $1",
+                        parsed_document_id,
+                    )
+            return {
+                "document_id": document_id,
+                "status": "password_invalid",
+                "attempts_remaining": remaining,
+            }
+
+        if persist_profile and row["thread_id"]:
+            await self._persist_profile_facts(str(row["thread_id"]), persist_profile)
+        return result
+
+    async def unlock_documents_for_thread(
+        self,
+        *,
+        thread_id: str,
+        password: str,
+        persist_profile: Optional[dict[str, str]] = None,
+    ) -> dict[str, Any]:
+        pool = await get_pool()
+        async with pool.acquire() as connection:
+            rows = await connection.fetch(
+                "select id from documents where thread_id = $1 and status = 'awaiting_password'",
+                thread_id,
+            )
+        outcomes: list[dict[str, Any]] = []
+        for row in rows:
+            outcomes.append(
+                await self.unlock_document(
+                    document_id=str(row["id"]),
+                    password=password,
+                    persist_profile=None,  # persist once at the thread level below
+                )
+            )
+        any_success = any(o.get("status") not in {"password_invalid", "password_attempts_exhausted"} for o in outcomes)
+        if any_success and persist_profile:
+            await self._persist_profile_facts(thread_id, persist_profile)
+        return {
+            "thread_id": thread_id,
+            "unlocked": sum(1 for o in outcomes if o.get("status") not in {"password_invalid", "password_attempts_exhausted"}),
+            "failed": sum(1 for o in outcomes if o.get("status") == "password_invalid"),
+            "exhausted": sum(1 for o in outcomes if o.get("status") == "password_attempts_exhausted"),
+            "results": outcomes,
+        }
+
+    async def _get_attempt_count(self, document_id: uuid.UUID) -> int:
+        pool = await get_pool()
+        async with pool.acquire() as connection:
+            value = await connection.fetchval(
+                "select attempt_count from document_password_attempts where document_id = $1",
+                document_id,
+            )
+        return int(value or 0)
+
+    async def _bump_attempt_count(self, document_id: uuid.UUID) -> int:
+        pool = await get_pool()
+        async with pool.acquire() as connection:
+            return int(
+                await connection.fetchval(
+                    """
+                    insert into document_password_attempts (document_id, attempt_count, last_attempt_at)
+                    values ($1, 1, now())
+                    on conflict (document_id)
+                    do update set attempt_count = document_password_attempts.attempt_count + 1,
+                                  last_attempt_at = now(),
+                                  updated_at = now()
+                    returning attempt_count
+                    """,
+                    document_id,
+                )
+            )
+
+    async def _persist_profile_facts(self, thread_id: str, profile: dict[str, str]) -> None:
+        """Save PAN+DOB back to the thread's tax_facts so auto-unlock works next time."""
+
+        state = await checkpointer.latest(thread_id)
+        if state is None:
+            return
+        tax_facts = dict(state.tax_facts or {})
+        changed = False
+        pan = profile.get("pan")
+        dob = profile.get("dob")
+        if pan and not tax_facts.get("pan"):
+            tax_facts["pan"] = pan.upper()
+            changed = True
+        if dob and not tax_facts.get("dob"):
+            tax_facts["dob"] = dob
+            changed = True
+        if changed:
+            state.tax_facts = tax_facts
+            await checkpointer.save(state)
 
     def _serialize_document_row(self, row: Record, versions: list[dict[str, Any]]) -> dict[str, Any]:
         normalized_text = row["normalized_json"]

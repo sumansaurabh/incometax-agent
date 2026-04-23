@@ -1263,6 +1263,58 @@ export async function uploadDocumentFile(input: {
   });
 }
 
+export type DocumentUnlockResult = {
+  document_id?: string;
+  thread_id?: string | null;
+  status: string;
+  document_type?: string;
+  attempts_remaining?: number;
+  encryption_kind?: string;
+  password_hint?: string | null;
+  version_no?: number;
+};
+
+export type DocumentUnlockBatchResult = {
+  thread_id: string;
+  unlocked: number;
+  failed: number;
+  exhausted: number;
+  results: DocumentUnlockResult[];
+};
+
+export async function unlockDocument(input: {
+  documentId: string;
+  password: string;
+  pan?: string;
+  dob?: string;
+}): Promise<DocumentUnlockResult> {
+  return request<DocumentUnlockResult>(`/api/documents/${input.documentId}/unlock`, {
+    method: "POST",
+    body: JSON.stringify({
+      password: input.password,
+      pan: input.pan ?? null,
+      dob: input.dob ?? null,
+    }),
+  });
+}
+
+export async function unlockDocumentBatch(input: {
+  threadId: string;
+  password: string;
+  pan?: string;
+  dob?: string;
+}): Promise<DocumentUnlockBatchResult> {
+  return request<DocumentUnlockBatchResult>("/api/documents/unlock-batch", {
+    method: "POST",
+    body: JSON.stringify({
+      thread_id: input.threadId,
+      password: input.password,
+      pan: input.pan ?? null,
+      dob: input.dob ?? null,
+    }),
+  });
+}
+
 export async function searchDocuments(input: {
   threadId: string;
   query: string;

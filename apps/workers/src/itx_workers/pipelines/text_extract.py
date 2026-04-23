@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from itx_workers.parsers.common import (
+    PasswordRequiredError,
+    _looks_like_encrypted_ais_json,
     decode_text_bytes,
     extract_pdf_pages_from_bytes,
     extract_text_from_image_bytes,
@@ -45,6 +47,11 @@ def run(payload: dict) -> dict:
             result["ocr_used"] = bool(text)
             result["ocr_confidence"] = confidence
         elif mime_type in {"application/json", "text/csv", "text/plain"} or file_name.endswith((".json", ".csv", ".txt")):
+            if file_name.endswith(".json") and _looks_like_encrypted_ais_json(content_bytes, file_name):
+                # AIS/TIS JSON from the IT portal ships encrypted with the same PAN+DOB
+                # password as the PDF. Decryption is not yet implemented; surface the
+                # same signal so the UI prompts the user to upload the AIS PDF instead.
+                raise PasswordRequiredError("ais_json", hint="upload_ais_pdf_instead")
             text = normalize_text(decode_text_bytes(content_bytes))
             confidence = 0.99 if text else 0.0
         else:

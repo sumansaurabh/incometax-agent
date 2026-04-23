@@ -33,6 +33,8 @@ import {
   revokeCurrentSession,
   searchDocuments,
   sendChatMessage,
+  unlockDocument,
+  unlockDocumentBatch,
   uploadDocumentFile,
 } from "./backend";
 import { ChatPane } from "./panes/ChatPane";
@@ -539,12 +541,23 @@ export default function App(): JSX.Element {
       appendErrorMessage("Sign in before uploading documents.");
       return;
     }
+    const awaitingPassword: Array<{ documentId: string; fileName: string; kind: "pdf" | "ais_json"; hint?: string; attemptsRemaining: number }> = [];
     for (const file of files) {
       appendAgentMessage(`Uploading **${file.name}** and sending it through parsing and indexing.`);
       setIsBusy(true);
       try {
         const uploaded = await uploadDocumentFile({ threadId: session.threadId, file });
         const status = String(uploaded.status ?? "queued");
+        if (status === "awaiting_password" && uploaded.document_id) {
+          awaitingPassword.push({
+            documentId: String(uploaded.document_id),
+            fileName: file.name,
+            kind: (String(uploaded.encryption_kind ?? "pdf") === "ais_json" ? "ais_json" : "pdf"),
+            hint: uploaded.password_hint ? String(uploaded.password_hint) : undefined,
+            attemptsRemaining: Number(uploaded.attempts_remaining ?? 5),
+          });
+          continue;
+        }
         appendAgentMessage("", [
           {
             id: `uploaded-${String(uploaded.document_id ?? file.name)}`,
@@ -564,6 +577,117 @@ export default function App(): JSX.Element {
       } finally {
         setIsBusy(false);
       }
+    }
+    if (awaitingPassword.length > 0) {
+      // Consolidate into one card when every file uses the same encryption kind
+      // (the portal password is always the same PAN+DOB so a single submit covers all).
+      const allJson = awaitingPassword.every((entry) => entry.kind === "ais_json");
+      const allPdf = awaitingPassword.every((entry) => entry.kind === "pdf");
+      if (allJson || allPdf) {
+        const encryptionKind = allJson ? "ais_json" : "pdf";
+        appendAgentMessage("", [
+          {
+            id: `password-prompt-${Date.now()}`,
+            kind: "password_prompt",
+            title:
+              awaitingPassword.length === 1
+                ? `${awaitingPassword[0].fileName} is password protected`
+                : `${awaitingPassword.length} files are password protected`,
+            body:
+              encryptionKind === "ais_json"
+                ? "The AIS JSON format is encrypted with a scheme we cannot read yet."
+                : "Enter the Income Tax portal password (lowercase PAN + DDMMYYYY birthdate).",
+            passwordPrompt: {
+              documentIds: awaitingPassword.map((entry) => entry.documentId),
+              attemptsRemaining: Math.min(...awaitingPassword.map((entry) => entry.attemptsRemaining)),
+              hint: awaitingPassword[0].hint,
+              encryptionKind,
+            },
+          },
+        ]);
+      } else {
+        for (const entry of awaitingPassword) {
+          appendAgentMessage("", [
+            {
+              id: `password-prompt-${entry.documentId}`,
+              kind: "password_prompt",
+              title: `${entry.fileName} is password protected`,
+              body:
+                entry.kind === "ais_json"
+                  ? "The AIS JSON format is encrypted with a scheme we cannot read yet."
+                  : "Enter the Income Tax portal password (lowercase PAN + DDMMYYYY birthdate).",
+              passwordPrompt: {
+                documentIds: [entry.documentId],
+                attemptsRemaining: entry.attemptsRemaining,
+                hint: entry.hint,
+                encryptionKind: entry.kind,
+              },
+            },
+          ]);
+        }
+      }
+    }
+  };
+
+  const handleSubmitPassword = async (input: {
+    cardId: string;
+    documentIds: string[];
+    password: string;
+    pan?: string;
+    dob?: string;
+  }): Promise<void> => {
+    if (!session) {
+      appendErrorMessage("Sign in before unlocking documents.");
+      return;
+    }
+    setIsBusy(true);
+    try {
+      let unlocked = 0;
+      let failed = 0;
+      let exhausted = 0;
+      if (input.documentIds.length > 1) {
+        const batch = await unlockDocumentBatch({
+          threadId: session.threadId,
+          password: input.password,
+          pan: input.pan,
+          dob: input.dob,
+        });
+        unlocked = batch.unlocked;
+        failed = batch.failed;
+        exhausted = batch.exhausted;
+      } else if (input.documentIds.length === 1) {
+        const result = await unlockDocument({
+          documentId: input.documentIds[0],
+          password: input.password,
+          pan: input.pan,
+          dob: input.dob,
+        });
+        if (result.status === "password_invalid") failed = 1;
+        else if (result.status === "password_attempts_exhausted") exhausted = 1;
+        else unlocked = 1;
+      }
+      if (unlocked > 0) {
+        appendAgentMessage(
+          unlocked === 1
+            ? "Decrypted the document and re-ran the parser."
+            : `Decrypted ${unlocked} documents and re-ran the parser for each.`,
+        );
+        await refreshBackendState(session.threadId);
+      }
+      if (failed > 0) {
+        appendErrorMessage(
+          failed === input.documentIds.length
+            ? "That password did not match. Please try again."
+            : `${failed} document(s) did not accept that password.`,
+        );
+      }
+      if (exhausted > 0) {
+        appendErrorMessage(`${exhausted} document(s) exhausted the retry limit. Please re-upload them.`);
+      }
+    } catch (error: unknown) {
+      appendErrorMessage(`Unlock failed: ${error instanceof Error ? error.message : "unknown error"}`);
+    } finally {
+      setIsBusy(false);
     }
   };
 
@@ -749,6 +873,7 @@ export default function App(): JSX.Element {
         onFilesSelected={handleFilesSelected}
         onAction={handleAction}
         onProposalDecision={handleProposalDecision}
+        onSubmitPassword={handleSubmitPassword}
       />
       <SettingsDrawer
         open={settingsOpen}

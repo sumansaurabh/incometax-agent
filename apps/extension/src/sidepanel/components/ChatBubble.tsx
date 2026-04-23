@@ -11,11 +11,20 @@ type DecisionInput = {
   reason?: string;
 };
 
+type PasswordSubmit = (input: {
+  cardId: string;
+  documentIds: string[];
+  password: string;
+  pan?: string;
+  dob?: string;
+}) => Promise<void> | void;
+
 type Props = {
   message: ChatMessage;
   onCardAction: (actionId: string) => void;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   onProposalDecision?: (input: DecisionInput) => Promise<any>;
+  onSubmitPassword?: PasswordSubmit;
 };
 
 function formatRelativeTime(iso: string): string {
@@ -77,7 +86,7 @@ function MarkdownLite({ content }: { content: string }): JSX.Element {
   return <>{blocks}</>;
 }
 
-export function ChatBubble({ message, onCardAction, onProposalDecision }: Props): JSX.Element {
+export function ChatBubble({ message, onCardAction, onProposalDecision, onSubmitPassword }: Props): JSX.Element {
   const [copied, setCopied] = useState(false);
   const isUser = message.role === "user";
   const canCopy = message.role === "agent" && message.content.trim().length > 0;
@@ -88,7 +97,12 @@ export function ChatBubble({ message, onCardAction, onProposalDecision }: Props)
       <div className="chat-bubble">
         {message.content ? <MarkdownLite content={message.content} /> : null}
         {message.cards?.map((card) => (
-          <MessageCard key={card.id} card={card} onAction={onCardAction} />
+          <MessageCard
+            key={card.id}
+            card={card}
+            onAction={onCardAction}
+            onSubmitPassword={onSubmitPassword}
+          />
         ))}
         {proposals.length && onProposalDecision
           ? proposals.map((proposal) => (
