@@ -30,6 +30,20 @@ body {
   width: min(1180px, calc(100vw - 32px));
   margin: 0 auto;
   padding: 28px 0 40px;
+  transition: width 180ms ease, padding-right 180ms ease;
+}
+
+body.drawer-open .shell {
+  width: min(1180px, calc(100vw - 32px - 520px));
+  margin-left: auto;
+  margin-right: calc(520px + 16px);
+}
+
+@media (max-width: 1100px) {
+  body.drawer-open .shell {
+    width: calc(100vw - 32px);
+    margin-right: auto;
+  }
 }
 
 .hero {
@@ -301,3 +315,213 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 }
+
+/* =============================================================
+ * Verdict drawer / cards (isolated — do not rely on global buttons)
+ * ============================================================= */
+.link-button {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  font-weight: 700;
+  text-decoration: underline dotted;
+}
+.link-button:hover { transform: none; background: transparent; }
+.table.clickable-rows tr.client-row { cursor: pointer; }
+.table.clickable-rows tr.client-row:hover,
+.table.clickable-rows tr.client-row:focus-visible {
+  background: rgba(30, 41, 59, 0.05);
+  outline: none;
+}
+.hint { font-size: 12px; color: #64748b; margin: 0 0 8px; }
+
+/* Drawer shell */
+.verdict-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(520px, 100vw);
+  background: #ffffff;
+  border-left: 1px solid #e2e8f0;
+  box-shadow: -8px 0 24px rgba(15, 23, 42, 0.12);
+  z-index: 2147483000;
+  display: flex;
+  pointer-events: auto;
+}
+.verdict-drawer[hidden] { display: none; }
+.verdict-drawer-inner {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+.verdict-drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid #e2e8f0;
+  background: #ffffff;
+  flex: 0 0 auto;
+}
+.verdict-drawer-header h2 { margin: 0; font-size: 16px; color: var(--ink); }
+.verdict-drawer-header button.secondary {
+  padding: 8px 14px;
+  font-size: 13px;
+  border-radius: 10px;
+}
+.verdict-drawer-body {
+  padding: 14px 16px 20px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  color: var(--ink);
+}
+.verdict-drawer-meta { font-size: 13px; color: #475569; }
+
+/* Cards inside drawer */
+.verdict-drawer .verdict-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 12px;
+  background: #ffffff;
+  color: var(--ink);
+}
+.verdict-drawer .verdict-card.verdict-sev-high {
+  border-color: rgba(220, 38, 38, 0.45);
+  background: #fff5f5;
+}
+.verdict-drawer .verdict-card.verdict-sev-medium {
+  border-color: rgba(234, 179, 8, 0.5);
+  background: #fffbeb;
+}
+.verdict-drawer .verdict-card.verdict-sev-low {
+  border-color: rgba(16, 185, 129, 0.35);
+  background: #ecfdf5;
+}
+.verdict-drawer .verdict-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+.verdict-drawer .verdict-card-header strong { font-size: 14px; }
+
+/* Evidence */
+.verdict-drawer .verdict-evidence-list {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.verdict-drawer .verdict-evidence-item {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #ffffff;
+}
+/* Only strike the summary text, not child buttons/notes */
+.verdict-drawer .verdict-evidence-item.status-resolved { opacity: 0.72; }
+.verdict-drawer .verdict-evidence-item.status-resolved .verdict-evidence-summary > span:not(.pill):not(.verdict-status-chip) {
+  text-decoration: line-through;
+}
+.verdict-drawer .verdict-evidence-item.status-acknowledged { background: rgba(148, 163, 184, 0.12); }
+.verdict-drawer .verdict-evidence-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: var(--ink);
+}
+.verdict-drawer .verdict-status-chip {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(30, 41, 59, 0.1);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #1e293b;
+  font-weight: 600;
+}
+.verdict-drawer .verdict-actions {
+  margin-top: 8px;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* Buttons inside drawer — override global button styles explicitly */
+.verdict-drawer .verdict-action,
+.verdict-drawer button.verdict-action {
+  appearance: none;
+  border: 1px solid rgba(30, 41, 59, 0.25);
+  background: #ffffff;
+  color: #1e293b;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 6px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  line-height: 1.2;
+  min-height: 30px;
+  box-shadow: none;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.verdict-drawer button.verdict-action:hover {
+  transform: none;
+  background: #f1f5f9;
+  border-color: rgba(30, 41, 59, 0.4);
+}
+.verdict-drawer button.verdict-action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.verdict-drawer .verdict-resolution-note {
+  margin-top: 8px;
+  font-size: 11px;
+  color: #475569;
+  text-decoration: none;
+}
+.verdict-drawer .verdict-trail summary { cursor: pointer; font-size: 12px; color: var(--ink); }
+.verdict-drawer .verdict-trail ol { font-size: 12px; color: #475569; padding-left: 18px; margin: 6px 0 0; }
+.verdict-drawer .verdict-checklist h3 { margin: 12px 0 4px; font-size: 13px; color: var(--ink); }
+.verdict-drawer .verdict-checklist ul { margin: 0; padding-left: 18px; font-size: 13px; color: #475569; }
+
+/* Thread select should not look like a giant accent button */
+.document-form select[name="threadId"] {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(24, 33, 38, 0.18);
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--ink);
+  font: inherit;
+}
+
+/* Severity pills inside the drawer */
+.verdict-drawer .pill {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+.verdict-drawer .pill.high { background: rgba(220, 38, 38, 0.15); color: #991b1b; }
+.verdict-drawer .pill.medium { background: rgba(234, 179, 8, 0.2); color: #854d0e; }
+.verdict-drawer .pill.low { background: rgba(16, 185, 129, 0.18); color: #065f46; }

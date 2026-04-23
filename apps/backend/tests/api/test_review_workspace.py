@@ -64,6 +64,68 @@ class ReviewWorkspaceAssessmentTest(unittest.TestCase):
         self.assertTrue(assessment["security_status"]["quarantined"])
 
 
+class VerdictEvidenceTest(unittest.TestCase):
+    def _mismatch_state(self, resolutions=None) -> AgentState:
+        reconciliation = {
+            "mismatches": [
+                {"field": "salary.gross", "severity": "error", "ais_value": 850000, "document_value": 842000},
+                {"field": "bank.interest", "severity": "warning", "ais_value": 18000, "document_value": 15000},
+            ]
+        }
+        if resolutions is not None:
+            reconciliation["resolutions"] = resolutions
+        return AgentState(
+            thread_id="thread-mismatches",
+            user_id="user-9",
+            tax_facts={"name": "Ed"},
+            submission_summary={"blocking_issues": []},
+            reconciliation=reconciliation,
+        )
+
+    def test_material_mismatches_expose_per_item_evidence(self) -> None:
+        assessment = assess_agent_state(self._mismatch_state(), {"approvals": []})
+
+        mismatch_reason = next(r for r in assessment["reasons"] if r["code"] == "material-mismatches")
+        self.assertEqual(len(mismatch_reason["evidence"]), 2)
+        self.assertEqual(mismatch_reason["evidence"][0]["status"], "open")
+        kinds = {action["kind"] for action in mismatch_reason["evidence"][0]["actions"]}
+        self.assertIn("accept_ais", kinds)
+        self.assertIn("accept_doc", kinds)
+
+    def test_resolving_below_threshold_clears_material_mismatch_verdict(self) -> None:
+        state = self._mismatch_state(
+            resolutions=[
+                {
+                    "code": "material-mismatches",
+                    "item_id": "ais:salary.gross:0",
+                    "status": "resolved",
+                    "actor_email": "ca@example.com",
+                    "at": "2026-04-23T00:00:00+00:00",
+                }
+            ]
+        )
+
+        assessment = assess_agent_state(state, {"approvals": []})
+
+        self.assertEqual(assessment["mismatch_count"], 1)
+        codes = {reason["code"] for reason in assessment["reasons"]}
+        self.assertNotIn("material-mismatches", codes)
+
+    def test_mode_trigger_points_at_highest_severity_reason(self) -> None:
+        state = AgentState(
+            thread_id="thread-multi",
+            user_id="user-10",
+            tax_facts={"foreign_assets": True, "directorship": [{"company": "Acme", "din": "12345"}]},
+            submission_summary={"blocking_issues": []},
+            reconciliation={"mismatches": []},
+        )
+
+        assessment = assess_agent_state(state, {"approvals": []})
+
+        self.assertEqual(assessment["mode"], "ca-handoff")
+        self.assertIn(assessment["mode_trigger"], {"foreign-assets", "directorship"})
+
+
 class DocumentSecurityTest(unittest.TestCase):
     def test_prompt_like_text_is_flagged(self) -> None:
         security = analyze_text_security(

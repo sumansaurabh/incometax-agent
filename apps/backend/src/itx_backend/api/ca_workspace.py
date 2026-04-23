@@ -38,6 +38,12 @@ class CounterConsentRequest(BaseModel):
 class BulkExportRequest(BaseModel):
     thread_ids: Optional[list[str]] = None
 
+
+class VerdictResolutionRequest(BaseModel):
+    status: str
+    note: Optional[str] = None
+    action_kind: Optional[str] = None
+
 router = APIRouter(prefix="/api/ca", tags=["ca-workspace"])
 
 
@@ -145,6 +151,38 @@ async def client_support(thread_id: str) -> dict:
         return await review_workspace.support_assessment(thread_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="thread_not_found") from exc
+
+
+@router.get("/threads/{thread_id}/verdicts")
+async def thread_verdicts(thread_id: str) -> dict:
+    await _require_accessible_state(thread_id)
+    try:
+        return await review_workspace.verdicts(thread_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="thread_not_found") from exc
+
+
+@router.post("/threads/{thread_id}/verdicts/{code}/items/{item_id}/resolve")
+async def resolve_verdict_item(
+    thread_id: str, code: str, item_id: str, payload: VerdictResolutionRequest
+) -> dict:
+    auth = get_request_auth(required=True)
+    await _require_accessible_state(thread_id)
+    try:
+        return await review_workspace.record_verdict_resolution(
+            thread_id=thread_id,
+            code=code,
+            item_id=item_id,
+            status=payload.status,
+            actor_email=auth.email,
+            actor_user_id=auth.user_id,
+            note=payload.note,
+            action_kind=payload.action_kind,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="thread_not_found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/client/{thread_id}/export")

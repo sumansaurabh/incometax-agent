@@ -1,7 +1,15 @@
 import React, { useEffect, useState } from "react";
 
-import { fetchMyThreads, RegimePreview, SupportAssessment, ThreadSummary } from "../backend";
+import {
+  fetchMyThreads,
+  RegimePreview,
+  SupportAssessment,
+  SupportReason,
+  ThreadSummary,
+  VerdictCardData,
+} from "../backend";
 import { UploadedDocument } from "./chat-types";
+import { VerdictCard } from "./VerdictCard";
 
 type Props = {
   open: boolean;
@@ -23,7 +31,31 @@ type Props = {
   onSearchDocuments?: () => void;
   onCompareRegimes?: () => void;
   onOpenDocument?: (documentId: string) => void;
+  onResolveVerdictItem?: (input: {
+    code: string;
+    itemId: string;
+    status: "open" | "acknowledged" | "resolved";
+    actionKind?: string;
+    note?: string;
+  }) => Promise<void> | void;
+  onVerdictAction?: (kind: string, code: string) => void;
 };
+
+function reasonToVerdictCard(reason: SupportReason, mode: string, modeTrigger: string | null | undefined): VerdictCardData {
+  return {
+    verdict: {
+      code: reason.code,
+      title: reason.title,
+      detail: reason.detail,
+      severity: reason.severity,
+      mode_impact: mode,
+      is_mode_trigger: Boolean(modeTrigger && reason.code === modeTrigger),
+    },
+    evidence: reason.evidence ?? [],
+    actions: reason.actions ?? [],
+    trail: reason.trail ?? [],
+  };
+}
 
 function formatInr(value: number): string {
   return `INR ${Math.round(value).toLocaleString("en-IN")}`;
@@ -49,6 +81,8 @@ export function SettingsDrawer({
   onSearchDocuments,
   onCompareRegimes,
   onOpenDocument,
+  onResolveVerdictItem,
+  onVerdictAction,
 }: Props): JSX.Element | null {
   const [threads, setThreads] = useState<ThreadSummary[]>([]);
   const [loadingThreads, setLoadingThreads] = useState(false);
@@ -203,19 +237,36 @@ export function SettingsDrawer({
           {supportBlocked ? (
             <section className="settings-section settings-section-alert">
               <h3>Review needed</h3>
-              <p className="settings-alert-title">
-                {supportAssessment?.reasons[0]?.title ?? "The filing thread has a support blocker."}
-              </p>
               <ul className="settings-status-list">
                 <li>
                   <span>Mode</span>
                   <strong>{supportAssessment?.mode}</strong>
                 </li>
                 <li>
+                  <span>Triggered by</span>
+                  <strong>{supportAssessment?.mode_trigger ?? "—"}</strong>
+                </li>
+                <li>
                   <span>Blockers</span>
                   <strong>{supportAssessment?.blocking_issues.length ?? 0}</strong>
                 </li>
               </ul>
+              <div className="verdict-card-stack">
+                {(supportAssessment?.reasons ?? []).map((reason) => (
+                  <VerdictCard
+                    key={reason.code}
+                    data={reasonToVerdictCard(reason, supportAssessment?.mode ?? "", supportAssessment?.mode_trigger ?? null)}
+                    onResolve={onResolveVerdictItem ? async (input) => {
+                      await onResolveVerdictItem(input);
+                    } : undefined}
+                    onAction={onVerdictAction}
+                    busy={isBusy}
+                  />
+                ))}
+                {(supportAssessment?.reasons ?? []).length === 0 ? (
+                  <p className="settings-alert-title">The filing thread has a support blocker but no reasons were returned.</p>
+                ) : null}
+              </div>
             </section>
           ) : null}
 

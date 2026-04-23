@@ -35,6 +35,53 @@ type DashboardApiResponse = {
   analytics: DashboardOperationsSnapshot;
 };
 
+type VerdictEvidenceAction = {
+  id: string;
+  label: string;
+  kind: string;
+  requires_approval?: boolean;
+};
+
+type VerdictEvidenceItem = {
+  id: string;
+  code: string;
+  summary: string;
+  severity: string;
+  status: string;
+  resolvable: boolean;
+  actions: VerdictEvidenceAction[];
+  resolution?: {
+    status: string;
+    actor_email?: string | null;
+    at?: string | null;
+    note?: string | null;
+  } | null;
+};
+
+type VerdictCardData = {
+  verdict: {
+    code: string;
+    title: string;
+    detail: string;
+    severity: string;
+    mode_impact: string;
+    is_mode_trigger: boolean;
+  };
+  evidence: VerdictEvidenceItem[];
+  actions: VerdictEvidenceAction[];
+  trail: Array<{ actor?: string | null; verb?: string | null; at?: string | null; note?: string | null }>;
+};
+
+type VerdictsResponse = {
+  thread_id: string;
+  mode: string;
+  mode_trigger?: string | null;
+  can_autofill: boolean;
+  can_submit: boolean;
+  checklist: string[];
+  verdicts: VerdictCardData[];
+};
+
 type ReplayPipelineResponse = {
   totals: {
     snapshots_considered: number;
@@ -283,9 +330,9 @@ function renderDashboard(session: Session, response: DashboardApiResponse, repla
   const clientRows = model.clients
     .map(
       (client) => `
-        <tr>
+        <tr class="client-row" data-thread-id="${escapeHtml(client.threadId)}" tabindex="0" role="button">
           <td>${escapeHtml(client.name)}</td>
-          <td>${escapeHtml(client.threadId)}</td>
+          <td><code>${escapeHtml(client.threadId.slice(0, 8))}</code></td>
           <td><span class="pill ${client.risk}">${escapeHtml(client.risk)}</span></td>
           <td>${escapeHtml(client.status)}</td>
           <td>${escapeHtml(client.recommendedAction)}</td>
@@ -297,7 +344,30 @@ function renderDashboard(session: Session, response: DashboardApiResponse, repla
   const alerts = model.operations.alerts.length
     ? `<ul class="alerts">${model.operations.alerts.map((alert) => `<li>${escapeHtml(alert)}</li>`).join("")}</ul>`
     : `<div class="empty">No active platform alerts are being raised from the current replay, drift, and health signals.</div>`;
-  const defaultThreadId = response.clients[0]?.thread_id ?? "";
+
+  const clientsForSelect = response.clients;
+  const defaultThreadId = clientsForSelect[0]?.thread_id ?? "";
+  const groupOrder: Array<{ mode: string; label: string }> = [
+    { mode: "ca-handoff", label: "CA handoff" },
+    { mode: "guided-checklist", label: "Guided review" },
+    { mode: "supported", label: "Ready to submit" },
+    { mode: "", label: "Other" },
+  ];
+  const groupedOptions = groupOrder
+    .map(({ mode, label }) => {
+      const items = clientsForSelect.filter((client) => (client.support_mode ?? "") === mode);
+      if (items.length === 0) return "";
+      const options = items
+        .map((client) => {
+          const name = client.name || client.pan || "Unnamed";
+          const suffix = client.mismatch_count ? ` · ${client.mismatch_count} mismatch${client.mismatch_count === 1 ? "" : "es"}` : "";
+          const selected = client.thread_id === defaultThreadId ? " selected" : "";
+          return `<option value="${escapeHtml(client.thread_id)}"${selected}>${escapeHtml(name)} · ${escapeHtml(client.thread_id.slice(0, 8))}${escapeHtml(suffix)}</option>`;
+        })
+        .join("");
+      return `<optgroup label="${escapeHtml(label)}">${options}</optgroup>`;
+    })
+    .join("");
 
   return `
     <div class="shell">
@@ -331,19 +401,26 @@ function renderDashboard(session: Session, response: DashboardApiResponse, repla
       <section class="panel document-workspace">
         <div>
           <h2>Document intake and search</h2>
-          <p>Upload tax PDFs, CSVs, JSON, images, or text files for a thread. Parsed documents are indexed for semantic search when OpenAI embeddings and Qdrant are configured.</p>
+          <p>Upload tax PDFs, CSVs, JSON, images, or text files for a thread.</p>
         </div>
         <form class="document-form" id="document-upload-form">
           <label>
-            Thread ID
-            <input name="threadId" value="${escapeHtml(defaultThreadId)}" placeholder="thread-id" required />
+            Thread
+            ${clientsForSelect.length > 0 ? `
+              <select name="threadId" id="thread-select" required>
+                ${groupedOptions}
+              </select>
+            ` : `
+              <input name="threadId" value="${escapeHtml(defaultThreadId)}" placeholder="thread-id" required />
+            `}
           </label>
           <label>
             Files
             <input name="files" type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.csv,.json,.txt,application/pdf,image/png,image/jpeg,text/csv,application/json,text/plain" required />
           </label>
-          <button type="submit">Upload and index</button>
-          <button type="button" class="secondary" id="refresh-documents">Refresh documents</button>
+          <button type="submit">Upload</button>
+          <button type="button" class="secondary" id="refresh-documents">Refresh</button>
+          <button type="button" class="secondary" id="open-verdicts">View verdicts</button>
         </form>
         <form class="document-form" id="document-search-form">
           <label>
@@ -358,7 +435,8 @@ function renderDashboard(session: Session, response: DashboardApiResponse, repla
       <section class="workspace">
         <div class="panel">
           <h2>Client queue</h2>
-          <table class="table">
+          <p class="hint">Click a row to open its verdict detail.</p>
+          <table class="table clickable-rows">
             <thead>
               <tr>
                 <th>Client</th>
@@ -368,7 +446,7 @@ function renderDashboard(session: Session, response: DashboardApiResponse, repla
                 <th>Recommended action</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody id="client-queue-body">
               ${clientRows || `<tr><td colspan="5"><div class="empty">No accessible clients are available for this operator yet.</div></td></tr>`}
             </tbody>
           </table>
@@ -379,7 +457,11 @@ function renderDashboard(session: Session, response: DashboardApiResponse, repla
             <h2>Queues</h2>
             <p>Pending approvals: <strong>${model.queues.pendingApprovals}</strong></p>
             <p>Pending sign-offs: <strong>${model.queues.pendingSignoffs}</strong></p>
-            <p>Mismatches to review: <strong>${model.queues.mismatchReview}</strong></p>
+            <p>Mismatches to review:
+              <button type="button" class="link-button" id="mismatch-queue-button">
+                <strong>${model.queues.mismatchReview}</strong>
+              </button>
+            </p>
           </div>
           <div class="panel">
             <h2>Ops alerts</h2>
@@ -387,8 +469,108 @@ function renderDashboard(session: Session, response: DashboardApiResponse, repla
           </div>
         </div>
       </section>
+
+      <aside id="verdict-drawer" class="verdict-drawer" hidden>
+        <div class="verdict-drawer-inner">
+          <header class="verdict-drawer-header">
+            <h2>Thread verdicts</h2>
+            <button type="button" class="secondary" id="verdict-drawer-close">Close</button>
+          </header>
+          <div id="verdict-drawer-body" class="verdict-drawer-body">
+            <p class="empty">Select a client row to load verdicts.</p>
+          </div>
+        </div>
+      </aside>
     </div>
   `;
+}
+
+function severityPillClass(sev: string | undefined): string {
+  const value = String(sev ?? "").toLowerCase();
+  if (value === "high" || value === "error") return "high";
+  if (value === "medium" || value === "warning") return "medium";
+  return "low";
+}
+
+function renderVerdictDrawerContents(data: VerdictsResponse): string {
+  if (!data.verdicts.length) {
+    return `<p class="empty">No open verdicts for thread <code>${escapeHtml(data.thread_id.slice(0, 8))}</code>. Mode: <strong>${escapeHtml(data.mode)}</strong>.</p>`;
+  }
+  const cards = data.verdicts
+    .map((card) => {
+      const evidence = card.evidence
+        .map((item) => {
+          const actions = item.resolvable
+            ? `<div class="verdict-actions">${item.actions
+                .map(
+                  (action) =>
+                    `<button type="button" class="verdict-action" data-resolve-code="${escapeHtml(item.code)}" data-resolve-item="${escapeHtml(item.id)}" data-resolve-kind="${escapeHtml(action.kind)}">${escapeHtml(action.label)}${action.requires_approval ? " *" : ""}</button>`,
+                )
+                .join("")}</div>`
+            : "";
+          const resolution = item.resolution
+            ? `<div class="verdict-resolution-note">${escapeHtml(`${item.resolution.actor_email ?? "system"} · ${item.resolution.status}${item.resolution.at ? " · " + new Date(item.resolution.at).toLocaleString() : ""}${item.resolution.note ? " · " + item.resolution.note : ""}`)}</div>`
+            : "";
+          return `<li class="verdict-evidence-item status-${escapeHtml(item.status)}">
+            <div class="verdict-evidence-summary">
+              <span class="pill ${severityPillClass(item.severity)}">${escapeHtml(item.severity)}</span>
+              <span>${escapeHtml(item.summary)}</span>
+              <span class="verdict-status-chip">${escapeHtml(item.status)}</span>
+            </div>
+            ${actions}
+            ${resolution}
+          </li>`;
+        })
+        .join("");
+      const evidenceBlock = card.evidence.length
+        ? `<ul class="verdict-evidence-list">${evidence}</ul>`
+        : `<p class="empty">No structured evidence attached.</p>`;
+      const trail = card.trail.length
+        ? `<details class="verdict-trail"><summary>Audit trail (${card.trail.length})</summary><ol>${card.trail
+            .map(
+              (entry) =>
+                `<li>${escapeHtml(entry.actor ?? "system")} · ${escapeHtml(entry.verb ?? "event")}${entry.at ? ` · ${new Date(entry.at).toLocaleString()}` : ""}${entry.note ? ` — ${escapeHtml(entry.note)}` : ""}</li>`,
+            )
+            .join("")}</ol></details>`
+        : "";
+      return `<article class="verdict-card verdict-sev-${severityPillClass(card.verdict.severity)}">
+        <header class="verdict-card-header">
+          <span class="pill ${severityPillClass(card.verdict.severity)}">${escapeHtml(card.verdict.severity)}</span>
+          <strong>${escapeHtml(card.verdict.title)}</strong>
+          ${card.verdict.is_mode_trigger ? `<span class="pill medium">triggers ${escapeHtml(card.verdict.mode_impact)}</span>` : ""}
+        </header>
+        <p>${escapeHtml(card.verdict.detail)}</p>
+        ${evidenceBlock}
+        ${trail}
+      </article>`;
+    })
+    .join("");
+  const checklist = data.checklist.length
+    ? `<div class="verdict-checklist"><h3>Checklist</h3><ul>${data.checklist.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></div>`
+    : "";
+  return `<div class="verdict-drawer-meta">
+      <p>Thread <code>${escapeHtml(data.thread_id.slice(0, 8))}</code> · Mode <strong>${escapeHtml(data.mode)}</strong>${data.mode_trigger ? ` · Triggered by <code>${escapeHtml(data.mode_trigger)}</code>` : ""}</p>
+    </div>
+    ${cards}
+    ${checklist}`;
+}
+
+async function fetchThreadVerdicts(session: Session, threadId: string): Promise<VerdictsResponse> {
+  return apiRequest<VerdictsResponse>(session, `/api/ca/threads/${encodeURIComponent(threadId)}/verdicts`);
+}
+
+async function resolveDashboardVerdictItem(
+  session: Session,
+  threadId: string,
+  code: string,
+  itemId: string,
+  status: "open" | "acknowledged" | "resolved",
+  actionKind: string,
+): Promise<void> {
+  await apiRequest(session, `/api/ca/threads/${encodeURIComponent(threadId)}/verdicts/${encodeURIComponent(code)}/items/${encodeURIComponent(itemId)}/resolve`, {
+    method: "POST",
+    body: JSON.stringify({ status, action_kind: actionKind }),
+  });
 }
 
 async function fetchDashboardData(session: Session): Promise<DashboardApiResponse> {
@@ -608,10 +790,83 @@ function wireDashboardActions(session: Session): void {
     renderAuthView({ mode: "signin", message: "Signed out." });
   });
   wireDocumentActions(session);
+  wireVerdictDrawer(session);
+}
+
+function wireVerdictDrawer(session: Session): void {
+  const queueBody = document.querySelector<HTMLTableSectionElement>("#client-queue-body");
+  queueBody?.addEventListener("click", (event) => {
+    const target = event.target instanceof HTMLElement ? event.target.closest<HTMLTableRowElement>(".client-row") : null;
+    if (!target) return;
+    const threadId = target.getAttribute("data-thread-id");
+    if (!threadId) return;
+    void openVerdictDrawer(session, threadId);
+  });
+  queueBody?.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const target = event.target instanceof HTMLElement ? event.target.closest<HTMLTableRowElement>(".client-row") : null;
+    if (!target) return;
+    event.preventDefault();
+    const threadId = target.getAttribute("data-thread-id");
+    if (threadId) void openVerdictDrawer(session, threadId);
+  });
+  document.querySelector<HTMLButtonElement>("#open-verdicts")?.addEventListener("click", () => {
+    const threadId = currentDocumentThreadId();
+    if (!threadId) return;
+    void openVerdictDrawer(session, threadId);
+  });
+  document.querySelector<HTMLButtonElement>("#mismatch-queue-button")?.addEventListener("click", () => {
+    const threadId = currentDocumentThreadId();
+    if (threadId) void openVerdictDrawer(session, threadId);
+  });
+  document.querySelector<HTMLButtonElement>("#verdict-drawer-close")?.addEventListener("click", closeVerdictDrawer);
+  const body = document.querySelector<HTMLDivElement>("#verdict-drawer-body");
+  body?.addEventListener("click", async (event) => {
+    const target = event.target instanceof HTMLElement ? event.target.closest<HTMLButtonElement>("[data-resolve-item]") : null;
+    if (!target) return;
+    const threadId = body.getAttribute("data-thread-id");
+    const code = target.getAttribute("data-resolve-code") || "";
+    const itemId = target.getAttribute("data-resolve-item") || "";
+    const kind = target.getAttribute("data-resolve-kind") || "resolve";
+    if (!threadId || !code || !itemId) return;
+    const nextStatus: "open" | "acknowledged" | "resolved" = kind === "acknowledge" ? "acknowledged" : kind === "open" ? "open" : "resolved";
+    target.disabled = true;
+    try {
+      await resolveDashboardVerdictItem(session, threadId, code, itemId, nextStatus, kind);
+      await openVerdictDrawer(session, threadId);
+    } catch (error) {
+      target.disabled = false;
+      alert(error instanceof Error ? error.message : "Resolution failed.");
+    }
+  });
 }
 
 function currentDocumentThreadId(): string {
+  const select = document.querySelector<HTMLSelectElement>('#document-upload-form select[name="threadId"]');
+  if (select) return select.value.trim();
   return String(document.querySelector<HTMLInputElement>('#document-upload-form input[name="threadId"]')?.value || "").trim();
+}
+
+async function openVerdictDrawer(session: Session, threadId: string): Promise<void> {
+  const drawer = document.querySelector<HTMLElement>("#verdict-drawer");
+  const body = document.querySelector<HTMLDivElement>("#verdict-drawer-body");
+  if (!drawer || !body) return;
+  drawer.hidden = false;
+  document.body.classList.add("drawer-open");
+  body.innerHTML = `<p class="empty">Loading verdicts for <code>${escapeHtml(threadId.slice(0, 8))}</code>…</p>`;
+  try {
+    const data = await fetchThreadVerdicts(session, threadId);
+    body.innerHTML = renderVerdictDrawerContents(data);
+    body.setAttribute("data-thread-id", threadId);
+  } catch (error) {
+    body.innerHTML = `<p class="flash-error">${escapeHtml(error instanceof Error ? error.message : "Failed to load verdicts.")}</p>`;
+  }
+}
+
+function closeVerdictDrawer(): void {
+  const drawer = document.querySelector<HTMLElement>("#verdict-drawer");
+  if (drawer) drawer.hidden = true;
+  document.body.classList.remove("drawer-open");
 }
 
 function setDocumentResults(html: string): void {

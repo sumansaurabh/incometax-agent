@@ -46,6 +46,312 @@ def _archive_member_name(storage_uri: str, prefix: str) -> str:
     return f"{prefix}/{filename}"
 
 
+_RESOLUTION_OPEN = "open"
+_RESOLUTION_RESOLVED = "resolved"
+VERDICT_RESOLUTION_STATUSES = {"open", "acknowledged", "resolved"}
+
+
+def _mismatch_item_id(mismatch: dict[str, Any], index: int) -> str:
+    raw_id = mismatch.get("id") or mismatch.get("mismatch_id")
+    if raw_id:
+        return str(raw_id)
+    field = str(mismatch.get("field") or mismatch.get("label") or "mismatch")
+    source = str(mismatch.get("source") or mismatch.get("category") or "ais")
+    return f"{source}:{field}:{index}"
+
+
+def _document_item_id(doc: dict[str, Any], index: int) -> str:
+    return str(doc.get("document_id") or doc.get("id") or f"doc:{index}")
+
+
+def _resolution_index(state: AgentState) -> dict[tuple[str, str], dict[str, Any]]:
+    reconciliation = state.reconciliation or {}
+    index: dict[tuple[str, str], dict[str, Any]] = {}
+    for entry in reconciliation.get("resolutions", []) or []:
+        code = str(entry.get("code") or "")
+        item_id = str(entry.get("item_id") or "")
+        if code and item_id:
+            index[(code, item_id)] = entry
+    return index
+
+
+def _evidence_item(
+    *,
+    item_id: str,
+    summary: str,
+    code: str,
+    resolutions: dict[tuple[str, str], dict[str, Any]],
+    severity: Optional[str] = None,
+    ref: Optional[dict[str, Any]] = None,
+    actions: Optional[list[dict[str, Any]]] = None,
+    detail: Optional[Any] = None,
+    resolvable: bool = True,
+) -> dict[str, Any]:
+    resolution = resolutions.get((code, item_id))
+    status = str(resolution.get("status")) if resolution else _RESOLUTION_OPEN
+    return {
+        "id": item_id,
+        "code": code,
+        "summary": summary,
+        "severity": severity or "medium",
+        "ref": ref or {},
+        "detail": detail,
+        "status": status,
+        "resolvable": resolvable and status != _RESOLUTION_RESOLVED,
+        "resolution": resolution,
+        "actions": actions
+        or [
+            {"id": "resolve", "label": "Mark resolved", "kind": "resolve", "requires_approval": False},
+            {"id": "acknowledge", "label": "Acknowledge", "kind": "acknowledge", "requires_approval": False},
+        ],
+    }
+
+
+def _has_real_value(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, (int, float)):
+        return abs(float(value)) > 0.005
+    if isinstance(value, str):
+        return value.strip() not in {"", "0", "0.0", "None", "null"}
+    return True
+
+
+def _format_value(value: Any) -> str:
+    if value is None:
+        return "—"
+    if isinstance(value, float):
+        if value.is_integer():
+            return f"{int(value):,}"
+        return f"{value:,.2f}"
+    if isinstance(value, int):
+        return f"{value:,}"
+    return str(value)
+
+
+def _mismatch_sides(mismatch: dict[str, Any]) -> tuple[Any, Any]:
+    """Return (ais_side_value, doc_side_value) using the canonical reconcile keys."""
+    ais_value = mismatch.get("ais_value", mismatch.get("expected"))
+    # reconcile emits both `our_value` and `doc_value`; prefer an explicit document-side key
+    doc_value = mismatch.get("doc_value")
+    if doc_value is None:
+        doc_value = mismatch.get("our_value", mismatch.get("document_value", mismatch.get("actual")))
+    return ais_value, doc_value
+
+
+def _material_mismatch_evidence(
+    mismatches: list[dict[str, Any]],
+    resolutions: dict[tuple[str, str], dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Return (open_material_evidence, all_material_evidence).
+
+    Skips mismatches where neither side has a real value — those are "no data yet", not a
+    discrepancy, and should not block filing. Per-item actions are filtered to only the
+    ones that make sense: e.g. Accept AIS is hidden when AIS has no value.
+    """
+    all_items: list[dict[str, Any]] = []
+    for index, mismatch in enumerate(mismatches):
+        severity = str(mismatch.get("severity", "")).lower()
+        if severity not in {"error", "high", "warning"}:
+            continue
+
+        ais_value, doc_value = _mismatch_sides(mismatch)
+        ais_has = _has_real_value(ais_value)
+        doc_has = _has_real_value(doc_value)
+        if not ais_has and not doc_has:
+            # Both sides empty: nothing to reconcile. Skip entirely.
+            continue
+
+        item_id = _mismatch_item_id(mismatch, index)
+        field = mismatch.get("field") or mismatch.get("label") or "field"
+        category = mismatch.get("category") or "mismatch"
+        summary = (
+            f"{field}: AIS {_format_value(ais_value)} vs document {_format_value(doc_value)}"
+            f" ({category.replace('_', ' ').replace('-', ' ')})"
+        )
+
+        actions: list[dict[str, Any]] = []
+        if ais_has:
+            actions.append(
+                {
+                    "id": "accept_ais",
+                    "label": "Accept AIS value",
+                    "kind": "accept_ais",
+                    "requires_approval": False,
+                    "value": ais_value,
+                }
+            )
+        if doc_has:
+            actions.append(
+                {
+                    "id": "accept_doc",
+                    "label": "Accept document value",
+                    "kind": "accept_doc",
+                    "requires_approval": False,
+                    "value": doc_value,
+                }
+            )
+        actions.append(
+            {
+                "id": "note",
+                "label": "Add note",
+                "kind": "note",
+                "requires_approval": False,
+                "prompts_for_note": True,
+            }
+        )
+        actions.append(
+            {"id": "resolve", "label": "Mark reviewed", "kind": "resolve", "requires_approval": False}
+        )
+
+        all_items.append(
+            _evidence_item(
+                item_id=item_id,
+                summary=summary,
+                code="material-mismatches",
+                resolutions=resolutions,
+                severity=severity,
+                ref={
+                    "field": field,
+                    "category": category,
+                    "document_id": mismatch.get("document_id"),
+                    "ais_value": ais_value,
+                    "doc_value": doc_value,
+                },
+                actions=actions,
+                detail=mismatch,
+            )
+        )
+    open_items = [item for item in all_items if item["status"] != _RESOLUTION_RESOLVED]
+    return open_items, all_items
+
+
+def _flagged_document_evidence(
+    documents: list[dict[str, Any]],
+    resolutions: dict[tuple[str, str], dict[str, Any]],
+) -> list[dict[str, Any]]:
+    evidence: list[dict[str, Any]] = []
+    for index, doc in enumerate(documents):
+        risk = str(((doc.get("security") or {}).get("prompt_injection_risk") or "")).lower()
+        if risk not in {"medium", "high"}:
+            continue
+        item_id = _document_item_id(doc, index)
+        name = doc.get("file_name") or doc.get("name") or item_id
+        evidence.append(
+            _evidence_item(
+                item_id=item_id,
+                summary=f"{name} flagged for prompt-injection risk ({risk}).",
+                code="document-security",
+                resolutions=resolutions,
+                severity=risk,
+                ref={"document_id": item_id, "doc_type": doc.get("doc_type")},
+                actions=[
+                    {"id": "override", "label": "Override with justification", "kind": "override", "requires_approval": True},
+                    {"id": "resolve", "label": "Mark reviewed", "kind": "resolve", "requires_approval": False},
+                    {"id": "quarantine", "label": "Quarantine document", "kind": "quarantine", "requires_approval": False},
+                ],
+                detail={"risk": risk, "security": doc.get("security")},
+            )
+        )
+    return evidence
+
+
+def _capital_gains_evidence(
+    capital_gains: dict[str, Any],
+    resolutions: dict[tuple[str, str], dict[str, Any]],
+) -> list[dict[str, Any]]:
+    evidence: list[dict[str, Any]] = []
+    keys = ("derivatives", "futures_options", "intraday", "crypto")
+    for key in keys:
+        value = capital_gains.get(key)
+        if not _truthy(value):
+            continue
+        count = value if isinstance(value, (int, float)) else None
+        summary = f"{key.replace('_', ' ').title()} activity present" + (f" ({count} entries)" if count else "")
+        evidence.append(
+            _evidence_item(
+                item_id=key,
+                summary=summary,
+                code="complex-capital-gains",
+                resolutions=resolutions,
+                severity="high",
+                ref={"field": f"capital_gains.{key}"},
+                detail=value,
+            )
+        )
+    return evidence
+
+
+def _directorship_evidence(
+    tax_facts: dict[str, Any],
+    resolutions: dict[tuple[str, str], dict[str, Any]],
+) -> list[dict[str, Any]]:
+    raw = tax_facts.get("directorship")
+    if not _truthy(raw):
+        return []
+    entries: list[dict[str, Any]]
+    if isinstance(raw, list):
+        entries = [entry for entry in raw if isinstance(entry, dict)]
+    elif isinstance(raw, dict):
+        entries = [raw]
+    else:
+        entries = [{"summary": str(raw)}]
+    evidence: list[dict[str, Any]] = []
+    for index, entry in enumerate(entries):
+        company = entry.get("company") or entry.get("name") or f"entry-{index}"
+        din = entry.get("din") or entry.get("DIN")
+        summary = f"Directorship at {company}" + (f" (DIN {din})" if din else "")
+        evidence.append(
+            _evidence_item(
+                item_id=str(entry.get("din") or entry.get("id") or f"directorship-{index}"),
+                summary=summary,
+                code="directorship",
+                resolutions=resolutions,
+                severity="high",
+                ref={"field": "directorship", "company": company, "din": din},
+                detail=entry,
+            )
+        )
+    return evidence
+
+
+def _blocking_issue_evidence(
+    blocking_issues: list[Any],
+    resolutions: dict[tuple[str, str], dict[str, Any]],
+) -> list[dict[str, Any]]:
+    evidence: list[dict[str, Any]] = []
+    for index, issue in enumerate(blocking_issues):
+        text = str(issue)
+        evidence.append(
+            _evidence_item(
+                item_id=f"blocker-{index}",
+                summary=text,
+                code="submission-blocker",
+                resolutions=resolutions,
+                severity="high",
+                ref={"index": index, "text": text},
+            )
+        )
+    return evidence
+
+
+def _quarantine_trail(security_status: dict[str, Any]) -> list[dict[str, Any]]:
+    trail = security_status.get("trail") or security_status.get("history") or []
+    result: list[dict[str, Any]] = []
+    if isinstance(trail, list):
+        for entry in trail[-5:]:
+            if isinstance(entry, dict):
+                result.append(
+                    {
+                        "actor": entry.get("actor", "system"),
+                        "verb": entry.get("verb", "anomaly"),
+                        "at": entry.get("at") or entry.get("timestamp"),
+                        "note": entry.get("note") or entry.get("reason"),
+                    }
+                )
+    return result
+
+
 def assess_agent_state(state: AgentState, activity: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     tax_facts = state.tax_facts or {}
     documents = state.documents or []
@@ -55,8 +361,9 @@ def assess_agent_state(state: AgentState, activity: Optional[dict[str, Any]] = N
     blocking_issues = (state.submission_summary or {}).get("blocking_issues", [])
     approvals = (activity or {}).get("approvals", [])
     security_status = current_quarantine_status(state)
+    resolutions_index = _resolution_index(state)
 
-    reasons: list[dict[str, str]] = []
+    reasons: list[dict[str, Any]] = []
     checklist: list[str] = []
 
     if security_status.get("quarantined"):
@@ -66,6 +373,12 @@ def assess_agent_state(state: AgentState, activity: Optional[dict[str, Any]] = N
                 "title": "Automation is quarantined for this thread",
                 "detail": f"{security_status.get('reason') or 'Anomaly detection paused automation until you resume it manually.'}",
                 "severity": "medium",
+                "evidence": [],
+                "actions": [
+                    {"id": "resume", "label": "Resume automation", "kind": "resume_quarantine", "requires_approval": True},
+                    {"id": "view_anomalies", "label": "View anomalies", "kind": "open_security", "requires_approval": False},
+                ],
+                "trail": _quarantine_trail(security_status),
             }
         )
         checklist.append("Review the recent anomaly and explicitly resume the thread before more automation.")
@@ -77,6 +390,22 @@ def assess_agent_state(state: AgentState, activity: Optional[dict[str, Any]] = N
                 "title": "Foreign assets need specialist review",
                 "detail": "Schedule FA and related disclosures are outside the assisted filing path.",
                 "severity": "high",
+                "evidence": [
+                    _evidence_item(
+                        item_id="foreign-assets-declared",
+                        summary="Foreign assets flag set on tax facts — Schedule FA needed.",
+                        code="foreign-assets",
+                        resolutions=resolutions_index,
+                        severity="high",
+                        ref={"field": "tax_facts.foreign_assets"},
+                        detail=tax_facts.get("foreign_assets"),
+                    )
+                ],
+                "actions": [
+                    {"id": "handoff", "label": "Prepare CA handoff", "kind": "prepare_handoff", "requires_approval": False},
+                    {"id": "open_tax_facts", "label": "Open tax facts", "kind": "open_tax_facts", "requires_approval": False},
+                ],
+                "trail": [],
             }
         )
         checklist.extend(
@@ -87,59 +416,72 @@ def assess_agent_state(state: AgentState, activity: Optional[dict[str, Any]] = N
         )
 
     capital_gains = tax_facts.get("capital_gains") or {}
-    if isinstance(capital_gains, dict) and any(
-        _truthy(capital_gains.get(key)) for key in ("derivatives", "futures_options", "intraday", "crypto")
-    ):
-        reasons.append(
-            {
-                "code": "complex-capital-gains",
-                "title": "Complex capital-gains activity detected",
-                "detail": "Derivatives, intraday, or crypto trades need manual schedule validation before filing.",
-                "severity": "high",
-            }
-        )
-        checklist.append("Export broker contract notes and a realized-P&L statement for CA review.")
+    if isinstance(capital_gains, dict):
+        cg_evidence = _capital_gains_evidence(capital_gains, resolutions_index)
+        if cg_evidence:
+            reasons.append(
+                {
+                    "code": "complex-capital-gains",
+                    "title": "Complex capital-gains activity detected",
+                    "detail": "Derivatives, intraday, or crypto trades need manual schedule validation before filing.",
+                    "severity": "high",
+                    "evidence": cg_evidence,
+                    "actions": [
+                        {"id": "open_capital_gains", "label": "Open capital gains", "kind": "open_capital_gains", "requires_approval": False},
+                    ],
+                    "trail": [],
+                }
+            )
+            checklist.append("Export broker contract notes and a realized-P&L statement for CA review.")
 
-    if _truthy(tax_facts.get("directorship")):
+    directorship_evidence = _directorship_evidence(tax_facts, resolutions_index)
+    if directorship_evidence:
         reasons.append(
             {
                 "code": "directorship",
                 "title": "Director disclosure needs review",
                 "detail": "Director or unlisted-shareholding disclosures are not safe to autofill without reviewer confirmation.",
                 "severity": "high",
+                "evidence": directorship_evidence,
+                "actions": [
+                    {"id": "open_tax_facts", "label": "Open tax facts", "kind": "open_tax_facts", "requires_approval": False},
+                ],
+                "trail": [],
             }
         )
         checklist.append("Confirm directorship, DIN, and unlisted-shareholding disclosures with a reviewer.")
 
-    material_mismatches = [
-        mismatch
-        for mismatch in mismatches
-        if str(mismatch.get("severity", "")).lower() in {"error", "high", "warning"}
-    ]
-    if len(material_mismatches) >= 2:
+    material_mismatches_open, material_mismatches_all = _material_mismatch_evidence(mismatches, resolutions_index)
+    if len(material_mismatches_open) >= 2:
         reasons.append(
             {
                 "code": "material-mismatches",
                 "title": "Multiple material mismatches remain unresolved",
-                "detail": f"{len(material_mismatches)} mismatches still need manual confirmation against source documents.",
+                "detail": f"{len(material_mismatches_open)} mismatches still need manual confirmation against source documents.",
                 "severity": "medium",
+                "evidence": material_mismatches_all,
+                "actions": [
+                    {"id": "reconcile", "label": "Open reconciliation", "kind": "open_reconciliation", "requires_approval": False},
+                ],
+                "trail": [],
             }
         )
         checklist.append("Resolve AIS-vs-document mismatches before allowing another fill or submit step.")
 
-    flagged_documents = [
-        doc
-        for doc in [*documents, *rejected_documents]
-        if str(((doc.get("security") or {}).get("prompt_injection_risk") or "")).lower() in {"medium", "high"}
-    ]
-    if flagged_documents:
-        highest_risk = "high" if any((doc.get("security") or {}).get("prompt_injection_risk") == "high" for doc in flagged_documents) else "medium"
+    flagged_evidence = _flagged_document_evidence([*documents, *rejected_documents], resolutions_index)
+    if flagged_evidence:
+        highest_risk = "high" if any(item["severity"] == "high" and item["status"] != _RESOLUTION_RESOLVED for item in flagged_evidence) else "medium"
         reasons.append(
             {
                 "code": "document-security",
                 "title": "Risky document content was flagged",
                 "detail": "Uploaded text contained prompt-like instructions or suspicious control text and should be reviewed manually.",
                 "severity": highest_risk,
+                "evidence": flagged_evidence,
+                "actions": [
+                    {"id": "open_documents", "label": "Open documents", "kind": "open_documents", "requires_approval": False},
+                ],
+                "trail": [],
             }
         )
         checklist.append("Inspect flagged documents and confirm only factual values are being used for filing.")
@@ -151,12 +493,24 @@ def assess_agent_state(state: AgentState, activity: Optional[dict[str, Any]] = N
                 "title": "Submission blockers require manual intervention",
                 "detail": "The filing summary already reports blockers that the assisted flow should not override automatically.",
                 "severity": "high",
+                "evidence": _blocking_issue_evidence(blocking_issues, resolutions_index),
+                "actions": [
+                    {"id": "open_submission", "label": "Open submission summary", "kind": "open_submission", "requires_approval": False},
+                ],
+                "trail": [],
             }
         )
         checklist.append("Review filing blockers with a CA before attempting submission again.")
 
+    mode_trigger: Optional[str] = None
     if reasons:
-        mode = "ca-handoff" if any(reason["severity"] == "high" for reason in reasons) else "guided-checklist"
+        high_reasons = [reason for reason in reasons if reason["severity"] == "high"]
+        if high_reasons:
+            mode = "ca-handoff"
+            mode_trigger = high_reasons[0]["code"]
+        else:
+            mode = "guided-checklist"
+            mode_trigger = reasons[0]["code"]
     else:
         mode = "supported"
 
@@ -173,13 +527,15 @@ def assess_agent_state(state: AgentState, activity: Optional[dict[str, Any]] = N
     return {
         "thread_id": state.thread_id,
         "mode": mode,
+        "mode_trigger": mode_trigger,
         "can_autofill": can_autofill,
         "can_submit": can_submit,
         "reason_count": len(reasons),
         "reasons": reasons,
         "checklist": list(dict.fromkeys(checklist)),
         "blocking_issues": blocking_issues,
-        "mismatch_count": len(material_mismatches),
+        "mismatch_count": len(material_mismatches_open),
+        "mismatch_total": len(material_mismatches_all),
         "pending_approval_count": len([approval for approval in approvals if approval.get("status") == "pending"]),
         "security_status": security_status,
     }
@@ -333,6 +689,78 @@ class ReviewWorkspaceService:
         assessment["handoffs"] = await self.list_handoffs(thread_id)
         assessment["reviewer_signoffs"] = await self.list_signoffs(thread_id)
         return assessment
+
+    async def verdicts(self, thread_id: str) -> dict[str, Any]:
+        """Projection of assess_agent_state in VEA (verdict / evidence / action) shape."""
+        assessment = await self.support_assessment(thread_id)
+        verdicts = []
+        for reason in assessment.get("reasons", []) or []:
+            verdicts.append(
+                {
+                    "verdict": {
+                        "code": reason.get("code"),
+                        "title": reason.get("title"),
+                        "detail": reason.get("detail"),
+                        "severity": reason.get("severity"),
+                        "mode_impact": assessment.get("mode"),
+                        "is_mode_trigger": reason.get("code") == assessment.get("mode_trigger"),
+                    },
+                    "evidence": reason.get("evidence", []) or [],
+                    "actions": reason.get("actions", []) or [],
+                    "trail": reason.get("trail", []) or [],
+                }
+            )
+        return {
+            "thread_id": thread_id,
+            "mode": assessment.get("mode"),
+            "mode_trigger": assessment.get("mode_trigger"),
+            "can_autofill": assessment.get("can_autofill"),
+            "can_submit": assessment.get("can_submit"),
+            "checklist": assessment.get("checklist", []),
+            "verdicts": verdicts,
+        }
+
+    async def record_verdict_resolution(
+        self,
+        *,
+        thread_id: str,
+        code: str,
+        item_id: str,
+        status: str,
+        actor_email: str,
+        actor_user_id: str,
+        note: Optional[str] = None,
+        action_kind: Optional[str] = None,
+    ) -> dict[str, Any]:
+        if status not in VERDICT_RESOLUTION_STATUSES:
+            raise ValueError(f"invalid status {status!r}")
+        state = await checkpointer.latest(thread_id)
+        if state is None:
+            raise KeyError(thread_id)
+
+        reconciliation = dict(state.reconciliation or {})
+        resolutions = list(reconciliation.get("resolutions") or [])
+        now_iso = datetime.now(timezone.utc).isoformat()
+        filtered = [
+            entry
+            for entry in resolutions
+            if not (str(entry.get("code")) == code and str(entry.get("item_id")) == item_id)
+        ]
+        entry = {
+            "code": code,
+            "item_id": item_id,
+            "status": status,
+            "note": note,
+            "action_kind": action_kind,
+            "actor_email": actor_email,
+            "actor_user_id": actor_user_id,
+            "at": now_iso,
+        }
+        filtered.append(entry)
+        reconciliation["resolutions"] = filtered
+        state.reconciliation = reconciliation
+        await checkpointer.save(state)
+        return {"thread_id": thread_id, "resolution": entry, "verdicts": (await self.verdicts(thread_id))["verdicts"]}
 
     async def build_client_export_bundle(
         self,

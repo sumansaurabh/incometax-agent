@@ -1178,6 +1178,207 @@
 }
 
 /* =============================================================
+ * Verdict cards (VEA)
+ * ============================================================= */
+.verdict-card {
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  background: rgba(30, 41, 59, 0.04);
+  margin: 8px 0;
+  overflow: hidden;
+}
+.verdict-card.verdict-sev-high {
+  border-color: rgba(220, 38, 38, 0.45);
+  background: rgba(254, 226, 226, 0.35);
+}
+.verdict-card.verdict-sev-medium {
+  border-color: rgba(234, 179, 8, 0.45);
+  background: rgba(254, 249, 195, 0.35);
+}
+.verdict-card.verdict-sev-low {
+  border-color: rgba(16, 185, 129, 0.35);
+  background: rgba(209, 250, 229, 0.3);
+}
+.verdict-card-header {
+  display: flex;
+  align-items: center;
+  padding: 0;
+}
+.verdict-card-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  border: 0;
+  width: 100%;
+  padding: 10px 12px;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+.verdict-card-title {
+  flex: 1;
+  font-weight: 600;
+}
+.verdict-pill {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.2);
+  color: #1e293b;
+}
+.verdict-pill.verdict-sev-high {
+  background: rgba(220, 38, 38, 0.15);
+  color: #991b1b;
+}
+.verdict-pill.verdict-sev-medium {
+  background: rgba(234, 179, 8, 0.2);
+  color: #854d0e;
+}
+.verdict-pill.verdict-sev-low {
+  background: rgba(16, 185, 129, 0.18);
+  color: #065f46;
+}
+.verdict-trigger-badge {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(30, 41, 59, 0.12);
+  color: #1e293b;
+}
+.verdict-caret {
+  font-size: 12px;
+  opacity: 0.7;
+}
+.verdict-card-body {
+  padding: 0 12px 12px;
+}
+.verdict-detail {
+  margin: 0 0 10px;
+  color: #334155;
+  font-size: 13px;
+}
+.verdict-evidence-list {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.verdict-evidence-item {
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.6);
+}
+.verdict-evidence-item.status-resolved {
+  opacity: 0.72;
+}
+.verdict-evidence-item.status-resolved .verdict-evidence-text {
+  text-decoration: line-through;
+}
+.verdict-evidence-item.status-acknowledged {
+  background: rgba(148, 163, 184, 0.12);
+}
+.verdict-evidence-summary {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.verdict-evidence-text {
+  flex: 1;
+  font-size: 13px;
+  color: #1e293b;
+}
+.verdict-status-chip {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(30, 41, 59, 0.1);
+  color: #1e293b;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.verdict-evidence-actions,
+.verdict-card-actions {
+  margin-top: 6px;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.verdict-action,
+button.verdict-action {
+  appearance: none;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.2;
+  padding: 6px 12px;
+  min-height: 30px;
+  border-radius: 8px;
+  border: 1px solid rgba(30, 41, 59, 0.25);
+  background: #ffffff;
+  color: #1e293b;
+  cursor: pointer;
+  box-shadow: none;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.verdict-action:hover {
+  background: #f1f5f9;
+  border-color: rgba(30, 41, 59, 0.4);
+}
+.verdict-action[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.verdict-action-secondary {
+  background: rgba(30, 41, 59, 0.06);
+}
+.verdict-action-resolve {
+  border-color: rgba(16, 185, 129, 0.5);
+  color: #065f46;
+}
+.verdict-action-accept_ais,
+.verdict-action-accept_doc {
+  border-color: rgba(59, 130, 246, 0.45);
+  color: #1d4ed8;
+}
+.verdict-action-override,
+.verdict-action-quarantine {
+  border-color: rgba(220, 38, 38, 0.5);
+  color: #991b1b;
+}
+.verdict-resolution-note {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #475569;
+}
+.verdict-evidence-empty {
+  font-size: 12px;
+  color: #64748b;
+}
+.verdict-trail {
+  margin-top: 8px;
+  font-size: 12px;
+}
+.verdict-trail summary {
+  cursor: pointer;
+  color: #1e293b;
+}
+.verdict-trail ol {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  color: #475569;
+}
+
+/* =============================================================
  * Narrow responsive
  * ============================================================= */
 @media (max-width: 340px) {

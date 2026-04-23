@@ -29,6 +29,7 @@ import {
   grantOnboardingConsents,
   loginToBackend,
   normalizeApprovalItems,
+  resolveVerdictItem,
   revokeCurrentSession,
   searchDocuments,
   sendChatMessage,
@@ -772,6 +773,32 @@ export default function App(): JSX.Element {
         onOpenDocument={() => {
           setSettingsOpen(false);
           void handleSearchDocuments();
+        }}
+        onResolveVerdictItem={async (input) => {
+          if (!session?.threadId) return;
+          try {
+            await resolveVerdictItem({
+              threadId: session.threadId,
+              code: input.code,
+              itemId: input.itemId,
+              status: input.status,
+              actionKind: input.actionKind,
+              note: input.note,
+            });
+            await refreshBackendState(session.threadId);
+            appendAgentMessage(
+              `Marked ${input.code} · ${input.itemId} as **${input.status}**.`,
+            );
+          } catch (error) {
+            appendErrorMessage(
+              `Could not record resolution: ${error instanceof Error ? error.message : "unknown error"}`,
+            );
+          }
+        }}
+        onVerdictAction={(kind, code) => {
+          appendAgentMessage(
+            `Action **${kind}** requested for ${code}. Open the relevant pane to continue.`,
+          );
         }}
         isBusy={isBusy}
         onClose={() => setSettingsOpen(false)}

@@ -350,11 +350,85 @@ export type RegimePreview = {
   rationale: string[];
 };
 
+export type VerdictEvidenceAction = {
+  id: string;
+  label: string;
+  kind: string;
+  requires_approval?: boolean;
+};
+
+export type VerdictEvidenceItem = {
+  id: string;
+  code: string;
+  summary: string;
+  severity: string;
+  status: "open" | "acknowledged" | "resolved";
+  resolvable: boolean;
+  ref?: Record<string, unknown>;
+  detail?: unknown;
+  actions: VerdictEvidenceAction[];
+  resolution?: {
+    status: string;
+    note?: string | null;
+    action_kind?: string | null;
+    actor_email?: string | null;
+    at?: string | null;
+  } | null;
+};
+
+export type VerdictTrailEntry = {
+  actor?: string | null;
+  verb?: string | null;
+  at?: string | null;
+  note?: string | null;
+};
+
 export type SupportReason = {
   code: string;
   title: string;
   detail: string;
   severity: string;
+  evidence?: VerdictEvidenceItem[];
+  actions?: VerdictEvidenceAction[];
+  trail?: VerdictTrailEntry[];
+};
+
+export type VerdictCardData = {
+  verdict: {
+    code: string;
+    title: string;
+    detail: string;
+    severity: string;
+    mode_impact: string;
+    is_mode_trigger: boolean;
+  };
+  evidence: VerdictEvidenceItem[];
+  actions: VerdictEvidenceAction[];
+  trail: VerdictTrailEntry[];
+};
+
+export type VerdictsResponse = {
+  thread_id: string;
+  mode: string;
+  mode_trigger?: string | null;
+  can_autofill: boolean;
+  can_submit: boolean;
+  checklist: string[];
+  verdicts: VerdictCardData[];
+};
+
+export type VerdictResolutionResponse = {
+  thread_id: string;
+  resolution: {
+    code: string;
+    item_id: string;
+    status: string;
+    note?: string | null;
+    action_kind?: string | null;
+    actor_email?: string | null;
+    at?: string | null;
+  };
+  verdicts: VerdictCardData[];
 };
 
 export type ReviewHandoff = {
@@ -386,6 +460,7 @@ export type SecurityStatus = {
 export type SupportAssessment = {
   thread_id: string;
   mode: string;
+  mode_trigger?: string | null;
   can_autofill: boolean;
   can_submit: boolean;
   reason_count: number;
@@ -393,6 +468,7 @@ export type SupportAssessment = {
   checklist: string[];
   blocking_issues: string[];
   mismatch_count: number;
+  mismatch_total?: number;
   pending_approval_count: number;
   handoffs: ReviewHandoff[];
   security_status?: SecurityStatus;
@@ -1056,6 +1132,31 @@ export async function fetchRegimePreview(threadId: string): Promise<RegimePrevie
 
 export async function fetchSupportAssessment(threadId: string): Promise<SupportAssessment> {
   return request(`/api/ca/client/${threadId}/support`);
+}
+
+export async function fetchThreadVerdicts(threadId: string): Promise<VerdictsResponse> {
+  return request<VerdictsResponse>(`/api/ca/threads/${threadId}/verdicts`);
+}
+
+export async function resolveVerdictItem(input: {
+  threadId: string;
+  code: string;
+  itemId: string;
+  status: "open" | "acknowledged" | "resolved";
+  note?: string;
+  actionKind?: string;
+}): Promise<VerdictResolutionResponse> {
+  return request<VerdictResolutionResponse>(
+    `/api/ca/threads/${input.threadId}/verdicts/${encodeURIComponent(input.code)}/items/${encodeURIComponent(input.itemId)}/resolve`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        status: input.status,
+        note: input.note,
+        action_kind: input.actionKind,
+      }),
+    },
+  );
 }
 
 export async function fetchChatMessages(threadId: string, limit = 50): Promise<ChatHistoryResponse> {
