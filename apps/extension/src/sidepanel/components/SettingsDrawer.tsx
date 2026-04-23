@@ -37,6 +37,7 @@ type Props = {
     status: "open" | "acknowledged" | "resolved";
     actionKind?: string;
     note?: string;
+    acceptedValue?: number | string | null;
   }) => Promise<void> | void;
   onVerdictAction?: (kind: string, code: string) => void;
 };

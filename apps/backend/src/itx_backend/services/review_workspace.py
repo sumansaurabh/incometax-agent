@@ -731,9 +731,12 @@ class ReviewWorkspaceService:
         actor_user_id: str,
         note: Optional[str] = None,
         action_kind: Optional[str] = None,
+        accepted_value: Any = None,
     ) -> dict[str, Any]:
         if status not in VERDICT_RESOLUTION_STATUSES:
             raise ValueError(f"invalid status {status!r}")
+        if action_kind == "note" and not (note and note.strip()):
+            raise ValueError("note_required")
         state = await checkpointer.latest(thread_id)
         if state is None:
             raise KeyError(thread_id)
@@ -746,7 +749,7 @@ class ReviewWorkspaceService:
             for entry in resolutions
             if not (str(entry.get("code")) == code and str(entry.get("item_id")) == item_id)
         ]
-        entry = {
+        entry: dict[str, Any] = {
             "code": code,
             "item_id": item_id,
             "status": status,
@@ -756,6 +759,8 @@ class ReviewWorkspaceService:
             "actor_user_id": actor_user_id,
             "at": now_iso,
         }
+        if action_kind in {"accept_ais", "accept_doc"} and accepted_value is not None:
+            entry["accepted_value"] = accepted_value
         filtered.append(entry)
         reconciliation["resolutions"] = filtered
         state.reconciliation = reconciliation

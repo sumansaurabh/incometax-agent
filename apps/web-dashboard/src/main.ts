@@ -40,6 +40,8 @@ type VerdictEvidenceAction = {
   label: string;
   kind: string;
   requires_approval?: boolean;
+  value?: number | string | null;
+  prompts_for_note?: boolean;
 };
 
 type VerdictEvidenceItem = {
@@ -55,6 +57,8 @@ type VerdictEvidenceItem = {
     actor_email?: string | null;
     at?: string | null;
     note?: string | null;
+    action_kind?: string | null;
+    accepted_value?: number | string | null;
   } | null;
 };
 
@@ -504,12 +508,23 @@ function renderVerdictDrawerContents(data: VerdictsResponse): string {
             ? `<div class="verdict-actions">${item.actions
                 .map(
                   (action) =>
-                    `<button type="button" class="verdict-action" data-resolve-code="${escapeHtml(item.code)}" data-resolve-item="${escapeHtml(item.id)}" data-resolve-kind="${escapeHtml(action.kind)}">${escapeHtml(action.label)}${action.requires_approval ? " *" : ""}</button>`,
+                    `<button type="button" class="verdict-action" data-resolve-code="${escapeHtml(item.code)}" data-resolve-item="${escapeHtml(item.id)}" data-resolve-kind="${escapeHtml(action.kind)}"${action.value !== undefined && action.value !== null ? ` data-resolve-value="${escapeHtml(String(action.value))}"` : ""}${action.prompts_for_note ? ` data-resolve-prompt="1"` : ""}>${escapeHtml(action.label)}${action.requires_approval ? " *" : ""}</button>`,
                 )
                 .join("")}</div>`
             : "";
           const resolution = item.resolution
-            ? `<div class="verdict-resolution-note">${escapeHtml(`${item.resolution.actor_email ?? "system"} · ${item.resolution.status}${item.resolution.at ? " · " + new Date(item.resolution.at).toLocaleString() : ""}${item.resolution.note ? " · " + item.resolution.note : ""}`)}</div>`
+            ? (() => {
+                const parts: string[] = [item.resolution.actor_email ?? "system", item.resolution.status];
+                if (item.resolution.action_kind && item.resolution.action_kind !== "resolve") {
+                  parts.push(item.resolution.action_kind.replaceAll("_", " "));
+                }
+                if (item.resolution.accepted_value !== undefined && item.resolution.accepted_value !== null && item.resolution.accepted_value !== "") {
+                  parts.push(`accepted = ${String(item.resolution.accepted_value)}`);
+                }
+                if (item.resolution.at) parts.push(new Date(item.resolution.at).toLocaleString());
+                if (item.resolution.note) parts.push(`note: ${item.resolution.note}`);
+                return `<div class="verdict-resolution-note">${escapeHtml(parts.join(" · "))}</div>`;
+              })()
             : "";
           return `<li class="verdict-evidence-item status-${escapeHtml(item.status)}">
             <div class="verdict-evidence-summary">
@@ -566,10 +581,17 @@ async function resolveDashboardVerdictItem(
   itemId: string,
   status: "open" | "acknowledged" | "resolved",
   actionKind: string,
+  extras: { acceptedValue?: number | string | null; note?: string | null } = {},
 ): Promise<void> {
+  const body: Record<string, unknown> = { status, action_kind: actionKind };
+  if (extras.acceptedValue !== undefined && extras.acceptedValue !== null && extras.acceptedValue !== "") {
+    const numeric = Number(extras.acceptedValue);
+    body.accepted_value = Number.isFinite(numeric) ? numeric : extras.acceptedValue;
+  }
+  if (extras.note) body.note = extras.note;
   await apiRequest(session, `/api/ca/threads/${encodeURIComponent(threadId)}/verdicts/${encodeURIComponent(code)}/items/${encodeURIComponent(itemId)}/resolve`, {
     method: "POST",
-    body: JSON.stringify({ status, action_kind: actionKind }),
+    body: JSON.stringify(body),
   });
 }
 
@@ -828,11 +850,31 @@ function wireVerdictDrawer(session: Session): void {
     const code = target.getAttribute("data-resolve-code") || "";
     const itemId = target.getAttribute("data-resolve-item") || "";
     const kind = target.getAttribute("data-resolve-kind") || "resolve";
+    const value = target.getAttribute("data-resolve-value");
+    const promptsForNote = target.getAttribute("data-resolve-prompt") === "1";
     if (!threadId || !code || !itemId) return;
+
+    let note: string | null = null;
+    if (promptsForNote) {
+      const entered = window.prompt("Add a note for this mismatch (visible in the audit trail):", "");
+      if (entered === null) return;
+      const trimmed = entered.trim();
+      if (!trimmed) {
+        alert("Note cannot be empty. Choose 'Mark reviewed' if no note is needed.");
+        return;
+      }
+      note = trimmed;
+    }
+
+    let confirmationCopy = "";
+    if (kind === "accept_ais") confirmationCopy = `Use AIS value ${value ?? ""} as the filing truth for this field?`;
+    else if (kind === "accept_doc") confirmationCopy = `Use document value ${value ?? ""} as the filing truth for this field?`;
+    if (confirmationCopy && !window.confirm(confirmationCopy)) return;
+
     const nextStatus: "open" | "acknowledged" | "resolved" = kind === "acknowledge" ? "acknowledged" : kind === "open" ? "open" : "resolved";
     target.disabled = true;
     try {
-      await resolveDashboardVerdictItem(session, threadId, code, itemId, nextStatus, kind);
+      await resolveDashboardVerdictItem(session, threadId, code, itemId, nextStatus, kind, { acceptedValue: value, note });
       await openVerdictDrawer(session, threadId);
     } catch (error) {
       target.disabled = false;

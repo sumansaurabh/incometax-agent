@@ -784,10 +784,11 @@ export default function App(): JSX.Element {
               status: input.status,
               actionKind: input.actionKind,
               note: input.note,
+              acceptedValue: input.acceptedValue ?? null,
             });
             await refreshBackendState(session.threadId);
             appendAgentMessage(
-              `Marked ${input.code} · ${input.itemId} as **${input.status}**.`,
+              `Marked ${input.code} · ${input.itemId} as **${input.status}**${input.actionKind && input.actionKind !== "resolve" ? ` (${input.actionKind})` : ""}.`,
             );
           } catch (error) {
             appendErrorMessage(

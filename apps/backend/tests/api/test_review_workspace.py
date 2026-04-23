@@ -111,6 +111,41 @@ class VerdictEvidenceTest(unittest.TestCase):
         codes = {reason["code"] for reason in assessment["reasons"]}
         self.assertNotIn("material-mismatches", codes)
 
+    def test_mismatch_with_both_sides_empty_is_ignored(self) -> None:
+        state = AgentState(
+            thread_id="thread-empty",
+            user_id="user-11",
+            tax_facts={"name": "Empty"},
+            submission_summary={"blocking_issues": []},
+            reconciliation={
+                "mismatches": [
+                    {"field": "tax_paid.tds_salary", "severity": "warning", "ais_value": None, "our_value": None, "doc_value": None},
+                    {"field": "tax_paid.tds_other", "severity": "warning", "ais_value": 0, "our_value": 0, "doc_value": 0},
+                    {"field": "salary.gross", "severity": "error", "ais_value": 850000, "our_value": None, "doc_value": None},
+                    {"field": "other_sources.total", "severity": "warning", "ais_value": 12000, "our_value": 10000, "doc_value": 10000},
+                ]
+            },
+        )
+
+        assessment = assess_agent_state(state, {"approvals": []})
+        codes = {reason["code"] for reason in assessment["reasons"]}
+        # 2 of the 4 mismatches are empty-vs-empty → only 2 real ones remain → material-mismatches still triggers.
+        self.assertIn("material-mismatches", codes)
+        self.assertEqual(assessment["mismatch_count"], 2)
+
+        mismatch_reason = next(r for r in assessment["reasons"] if r["code"] == "material-mismatches")
+        # Evidence should not contain summaries mentioning '—' on both sides
+        for item in mismatch_reason["evidence"]:
+            self.assertFalse("AIS — vs document —" in item["summary"])
+        # Accept AIS must be present only when AIS has a real value
+        for item in mismatch_reason["evidence"]:
+            ais_val = (item["ref"] or {}).get("ais_value")
+            kinds = {action["kind"] for action in item["actions"]}
+            if ais_val in (None, 0):
+                self.assertNotIn("accept_ais", kinds)
+            else:
+                self.assertIn("accept_ais", kinds)
+
     def test_mode_trigger_points_at_highest_severity_reason(self) -> None:
         state = AgentState(
             thread_id="thread-multi",

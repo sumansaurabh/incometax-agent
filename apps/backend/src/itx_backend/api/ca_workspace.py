@@ -43,6 +43,7 @@ class VerdictResolutionRequest(BaseModel):
     status: str
     note: Optional[str] = None
     action_kind: Optional[str] = None
+    accepted_value: Optional[float] = None
 
 router = APIRouter(prefix="/api/ca", tags=["ca-workspace"])
 
@@ -178,6 +179,7 @@ async def resolve_verdict_item(
             actor_user_id=auth.user_id,
             note=payload.note,
             action_kind=payload.action_kind,
+            accepted_value=payload.accepted_value,
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="thread_not_found") from exc

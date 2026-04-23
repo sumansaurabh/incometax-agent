@@ -355,6 +355,8 @@ export type VerdictEvidenceAction = {
   label: string;
   kind: string;
   requires_approval?: boolean;
+  value?: number | string | null;
+  prompts_for_note?: boolean;
 };
 
 export type VerdictEvidenceItem = {
@@ -373,6 +375,7 @@ export type VerdictEvidenceItem = {
     action_kind?: string | null;
     actor_email?: string | null;
     at?: string | null;
+    accepted_value?: number | string | null;
   } | null;
 };
 
@@ -1145,16 +1148,22 @@ export async function resolveVerdictItem(input: {
   status: "open" | "acknowledged" | "resolved";
   note?: string;
   actionKind?: string;
+  acceptedValue?: number | string | null;
 }): Promise<VerdictResolutionResponse> {
+  const body: Record<string, unknown> = {
+    status: input.status,
+    note: input.note,
+    action_kind: input.actionKind,
+  };
+  if (input.acceptedValue !== undefined && input.acceptedValue !== null && input.acceptedValue !== "") {
+    const numeric = Number(input.acceptedValue);
+    body.accepted_value = Number.isFinite(numeric) ? numeric : input.acceptedValue;
+  }
   return request<VerdictResolutionResponse>(
     `/api/ca/threads/${input.threadId}/verdicts/${encodeURIComponent(input.code)}/items/${encodeURIComponent(input.itemId)}/resolve`,
     {
       method: "POST",
-      body: JSON.stringify({
-        status: input.status,
-        note: input.note,
-        action_kind: input.actionKind,
-      }),
+      body: JSON.stringify(body),
     },
   );
 }

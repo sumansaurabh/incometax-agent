@@ -8,6 +8,7 @@ type ResolveInput = {
   status: "acknowledged" | "resolved" | "open";
   actionKind?: string;
   note?: string;
+  acceptedValue?: number | string | null;
 };
 
 type Props = {
@@ -50,6 +51,26 @@ export function VerdictCard({ data, onResolve, onAction, defaultOpen = true, bus
         : action.kind === "open"
           ? "open"
           : "resolved";
+
+    let note: string | undefined;
+    if (action.prompts_for_note) {
+      const entered = typeof window !== "undefined" ? window.prompt("Add a note for this mismatch (visible in the audit trail):", "") : null;
+      if (entered === null) return;
+      const trimmed = entered.trim();
+      if (!trimmed) {
+        if (typeof window !== "undefined") window.alert("Note cannot be empty. Use 'Mark reviewed' if no note is needed.");
+        return;
+      }
+      note = trimmed;
+    }
+
+    if (action.kind === "accept_ais" || action.kind === "accept_doc") {
+      const label = action.kind === "accept_ais" ? "AIS" : "document";
+      if (typeof window !== "undefined" && !window.confirm(`Use ${label} value ${String(action.value ?? "")} as the filing truth for this field?`)) {
+        return;
+      }
+    }
+
     setLocalBusyItem(item.id);
     try {
       await onResolve({
@@ -57,6 +78,8 @@ export function VerdictCard({ data, onResolve, onAction, defaultOpen = true, bus
         itemId: item.id,
         status: nextStatus,
         actionKind: action.kind,
+        note,
+        acceptedValue: action.value ?? null,
       });
     } finally {
       setLocalBusyItem(null);
