@@ -8,6 +8,22 @@ AI copilot for the Indian Income Tax e-Filing portal. The local stack has three 
 
 Supporting infra (Postgres, Redis, Qdrant, MinIO) runs through Docker Compose.
 
+## Screenshots
+
+The extension lives alongside the Income Tax portal and helps with field selection, return setup, and document-aware guidance.
+
+![IncomeTax Agent helping interpret the filing type dropdown](img/HGk4IZJb0AAmw9T.jpeg)
+
+Portal guidance for filing-type selection and dropdown interpretation.
+
+![IncomeTax Agent providing step-by-step return setup guidance](img/HGk60M8bAAAd4BB.jpeg)
+
+Step-by-step instructions for assessment year, filing type, and filing mode.
+
+![IncomeTax Agent using uploaded Form 16 context and tax guidance](img/HGk60NBbgAAGeLq.jpeg)
+
+Document-aware assistance using uploaded Form 16 data and tax guidance.
+
 ## What Actually Uses Which Model
 
 This is the important part for this repo as it exists today:
