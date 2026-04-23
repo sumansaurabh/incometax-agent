@@ -121,8 +121,6 @@ class StartupHealthService:
                 issues.append("langfuse public/secret keys are required when ITX_LANGFUSE_ENABLED is true")
             if not (settings.langfuse_otlp_endpoint or settings.otel_exporter_otlp_endpoint):
                 issues.append("langfuse OTLP endpoint is required when ITX_LANGFUSE_ENABLED is true")
-        if settings.ai_provider and not settings.ai_api_key:
-            issues.append("ITX_AI_API_KEY is required when ITX_AI_PROVIDER is set")
 
         trace_status = get_trace_status()
         detail_parts = [

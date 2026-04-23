@@ -16,10 +16,6 @@ This is the important part for this repo as it exists today:
 - **The tax agent itself uses the Anthropic-compatible client path**, configured through `ITX_ANTHROPIC_*` and `ITX_AGENT_MODEL*`.
 - **Langfuse is optional** and not required for local development.
 
-The generic `ITX_AI_MODEL` setting in the current codebase is **not** what selects the embedding model and is **not** what the Anthropic agent runner uses. Right now it is only surfaced through generic config and health/telemetry wiring.
-
-`ITX_AI_API_KEY` is still present in the current Docker/health setup, so the safest local config is to set it to the same value as `ITX_OPENAI_API_KEY`. That keeps the health checks happy, but the actual OpenAI model used for embeddings is `ITX_EMBEDDING_MODEL`.
-
 ## Prerequisites
 
 - Docker and Docker Compose
@@ -36,12 +32,8 @@ Use this as the practical local setup for this service:
 ```env
 # OpenAI: used for embeddings and semantic document search.
 ITX_OPENAI_API_KEY=sk-...
+ITX_OPENAI_BASE_URL=https://api.openai.com/v1
 ITX_EMBEDDING_MODEL=text-embedding-3-small
-
-# Compatibility wiring: current compose/health checks still expect these.
-# Set ITX_AI_API_KEY to the same OpenAI key.
-ITX_AI_PROVIDER=openai
-ITX_AI_API_KEY=sk-...
 
 # Agent runtime: Anthropic-compatible endpoint.
 ITX_ANTHROPIC_API_KEY=ank_...
@@ -59,7 +51,6 @@ Notes:
 
 - `ITX_EMBEDDING_MODEL` is the OpenAI model that matters for document indexing and semantic search.
 - `ITX_AGENT_MODEL` and `ITX_AGENT_MODEL_DEEP` are the agent reasoning models that matter for chat and portal assistance.
-- `ITX_AI_MODEL` is not required for the current runtime path. If you keep it in `.env`, treat it as a compatibility field, not the real model selector.
 - If `ITX_OPENAI_API_KEY` is missing, parsing can still proceed, but embedding-backed indexing/search will degrade or be skipped.
 
 Optional keys if you want those capabilities:
@@ -154,7 +145,6 @@ The backend and workers are bind-mounted in Docker, so Python changes reload ins
 
 ## 5. Troubleshooting
 
-- If `/health` complains about `ITX_AI_API_KEY`, set it to the same value as `ITX_OPENAI_API_KEY`. That is a current health/config requirement, not proof that `ITX_AI_MODEL` is driving the runtime.
 - If document upload works but semantic search/indexing does not, check `ITX_OPENAI_API_KEY`, `ITX_EMBEDDING_MODEL`, Qdrant, and MinIO.
 - If chat or portal-assistance flows fail, check `ITX_ANTHROPIC_API_KEY`, `ITX_ANTHROPIC_BASE_URL`, `ITX_AGENT_MODEL`, and `ITX_AGENT_MODEL_DEEP`.
 - If you do not care about tracing, keep Langfuse disabled.
