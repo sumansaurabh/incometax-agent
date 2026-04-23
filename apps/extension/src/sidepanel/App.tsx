@@ -742,7 +742,6 @@ export default function App(): JSX.Element {
       <ChatPane
         messages={messages}
         contextualCards={contextualCards}
-        documents={documents}
         isBusy={isBusy}
         isTyping={isTyping}
         onSend={handleSend}
@@ -759,6 +758,7 @@ export default function App(): JSX.Element {
         parsedCount={parsedCount}
         indexedCount={indexedCount}
         factCount={factCount}
+        documents={documents}
         supportAssessment={supportAssessment}
         regimePreview={regimePreview}
         onSearchDocuments={() => {
@@ -768,6 +768,10 @@ export default function App(): JSX.Element {
         onCompareRegimes={() => {
           setSettingsOpen(false);
           void handleCompareRegimes();
+        }}
+        onOpenDocument={() => {
+          setSettingsOpen(false);
+          void handleSearchDocuments();
         }}
         isBusy={isBusy}
         onClose={() => setSettingsOpen(false)}

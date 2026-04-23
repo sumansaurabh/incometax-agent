@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 
 import { ChatBubble } from "../components/ChatBubble";
 import { ChatInput } from "../components/ChatInput";
-import { ChatCard, ChatMessage, UploadedDocument } from "../components/chat-types";
+import { ChatCard, ChatMessage } from "../components/chat-types";
 import { FileUpload } from "../components/FileUpload";
 import { MessageCard } from "../components/MessageCard";
 import { TypingIndicator } from "../components/TypingIndicator";
@@ -17,7 +17,6 @@ type ProposalDecisionInput = {
 type Props = {
   messages: ChatMessage[];
   contextualCards: ChatCard[];
-  documents: UploadedDocument[];
   isBusy: boolean;
   isTyping: boolean;
   onSend: (message: string) => void;
@@ -34,7 +33,6 @@ function dateKey(iso: string): string {
 export function ChatPane({
   messages,
   contextualCards,
-  documents,
   isBusy,
   isTyping,
   onSend,
@@ -82,16 +80,6 @@ export function ChatPane({
             <div className="context-card-stack">
               {contextualCards.map((card) => (
                 <MessageCard key={card.id} card={card} onAction={onAction} />
-              ))}
-            </div>
-          ) : null}
-          {documents.length ? (
-            <div className="document-strip">
-              {documents.slice(0, 4).map((document) => (
-                <button key={document.documentId} type="button" onClick={() => onAction(`search-document:${document.documentId}`)}>
-                  <span>{document.fileName}</span>
-                  <small>{document.status}</small>
-                </button>
               ))}
             </div>
           ) : null}

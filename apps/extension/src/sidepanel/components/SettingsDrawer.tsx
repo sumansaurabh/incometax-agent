@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 
 import { fetchMyThreads, RegimePreview, SupportAssessment, ThreadSummary } from "../backend";
+import { UploadedDocument } from "./chat-types";
 
 type Props = {
   open: boolean;
@@ -11,6 +12,7 @@ type Props = {
   parsedCount?: number;
   indexedCount?: number;
   factCount?: number;
+  documents?: UploadedDocument[];
   supportAssessment?: SupportAssessment | null;
   regimePreview?: RegimePreview | null;
   isBusy: boolean;
@@ -20,6 +22,7 @@ type Props = {
   onSignOut: () => void;
   onSearchDocuments?: () => void;
   onCompareRegimes?: () => void;
+  onOpenDocument?: (documentId: string) => void;
 };
 
 function formatInr(value: number): string {
@@ -35,6 +38,7 @@ export function SettingsDrawer({
   parsedCount = 0,
   indexedCount = 0,
   factCount = 0,
+  documents = [],
   supportAssessment,
   regimePreview,
   isBusy,
@@ -44,6 +48,7 @@ export function SettingsDrawer({
   onSignOut,
   onSearchDocuments,
   onCompareRegimes,
+  onOpenDocument,
 }: Props): JSX.Element | null {
   const [threads, setThreads] = useState<ThreadSummary[]>([]);
   const [loadingThreads, setLoadingThreads] = useState(false);
@@ -96,7 +101,7 @@ export function SettingsDrawer({
             </ul>
           </section>
 
-          <section className="settings-section">
+          {/* <section className="settings-section">
             <div className="settings-section-head">
               <h3>Documents</h3>
               {onSearchDocuments && documentCount > 0 ? (
@@ -115,26 +120,47 @@ export function SettingsDrawer({
                 No documents yet. Upload Form 16, AIS, TIS, or proofs from the chat.
               </p>
             ) : (
-              <div className="settings-metric-grid">
-                <div className="settings-metric">
-                  <span>Uploaded</span>
-                  <strong>{documentCount}</strong>
+              <>
+                <div className="settings-metric-grid">
+                  <div className="settings-metric">
+                    <span>Uploaded</span>
+                    <strong>{documentCount}</strong>
+                  </div>
+                  <div className="settings-metric">
+                    <span>Parsed</span>
+                    <strong>{parsedCount}</strong>
+                  </div>
+                  <div className="settings-metric">
+                    <span>Indexed</span>
+                    <strong>{indexedCount}</strong>
+                  </div>
+                  <div className="settings-metric">
+                    <span>Facts</span>
+                    <strong>{factCount}</strong>
+                  </div>
                 </div>
-                <div className="settings-metric">
-                  <span>Parsed</span>
-                  <strong>{parsedCount}</strong>
-                </div>
-                <div className="settings-metric">
-                  <span>Indexed</span>
-                  <strong>{indexedCount}</strong>
-                </div>
-                <div className="settings-metric">
-                  <span>Facts</span>
-                  <strong>{factCount}</strong>
-                </div>
-              </div>
+                {documents.length > 0 ? (
+                  <ul className="settings-doc-list">
+                    {documents.slice(0, 6).map((document) => (
+                      <li key={document.documentId}>
+                        <button
+                          type="button"
+                          className="settings-doc-item"
+                          disabled={isBusy || !onOpenDocument}
+                          onClick={() => onOpenDocument?.(document.documentId)}
+                        >
+                          <span className="settings-doc-name">{document.fileName}</span>
+                          <span className={`settings-doc-status settings-doc-status-${document.status}`}>
+                            {document.status}
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </>
             )}
-          </section>
+          </section> */}
 
           <section className="settings-section">
             <div className="settings-section-head">

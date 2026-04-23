@@ -55,7 +55,7 @@ function classifyTrust(url: string | undefined): TrustStatus {
       host,
       url,
       canOperate: true,
-      message: "Verified official e-Filing portal domain.",
+      message: "E-Filing portal domain.",
     };
   }
   if (host.includes("incometax") || host.includes("gov.in")) {
