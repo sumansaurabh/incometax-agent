@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 
-import { fetchMyThreads, ThreadSummary } from "../backend";
+import { fetchMyThreads, RegimePreview, SupportAssessment, ThreadSummary } from "../backend";
 
 type Props = {
   open: boolean;
@@ -11,13 +11,20 @@ type Props = {
   parsedCount?: number;
   indexedCount?: number;
   factCount?: number;
+  supportAssessment?: SupportAssessment | null;
+  regimePreview?: RegimePreview | null;
   isBusy: boolean;
   onClose: () => void;
   onNewConversation: () => void;
   onSwitchThread: (threadId: string) => void;
   onSignOut: () => void;
   onSearchDocuments?: () => void;
+  onCompareRegimes?: () => void;
 };
+
+function formatInr(value: number): string {
+  return `INR ${Math.round(value).toLocaleString("en-IN")}`;
+}
 
 export function SettingsDrawer({
   open,
@@ -28,12 +35,15 @@ export function SettingsDrawer({
   parsedCount = 0,
   indexedCount = 0,
   factCount = 0,
+  supportAssessment,
+  regimePreview,
   isBusy,
   onClose,
   onNewConversation,
   onSwitchThread,
   onSignOut,
   onSearchDocuments,
+  onCompareRegimes,
 }: Props): JSX.Element | null {
   const [threads, setThreads] = useState<ThreadSummary[]>([]);
   const [loadingThreads, setLoadingThreads] = useState(false);
@@ -49,84 +59,192 @@ export function SettingsDrawer({
 
   if (!open) return null;
 
+  const supportBlocked =
+    supportAssessment && (!supportAssessment.can_autofill || !supportAssessment.can_submit);
+
   return (
     <aside className="settings-backdrop" onClick={onClose}>
-      <section className="settings-drawer" onClick={(event) => event.stopPropagation()}>
-        <header>
-          <div>
-            <p>Settings</p>
+      <section
+        className="settings-drawer"
+        role="dialog"
+        aria-label="Settings"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <header className="settings-header">
+          <div className="settings-header-text">
+            <p className="settings-eyebrow">Account</p>
             <h2>{email}</h2>
+            {threadId ? <span className="settings-thread-chip">Thread {threadId.slice(0, 8)}</span> : null}
           </div>
           <button className="icon-button" type="button" aria-label="Close settings" onClick={onClose}>
-            x
+            ×
           </button>
         </header>
-        <dl>
-          <div>
-            <dt>Active thread</dt>
-            <dd>{threadId ? threadId.slice(0, 8) : "Not started"}</dd>
-          </div>
-          <div>
-            <dt>Portal trust</dt>
-            <dd>{trustMessage ?? "Unknown"}</dd>
-          </div>
-          <div>
-            <dt>Documents</dt>
-            <dd>
-              {documentCount} uploaded · {parsedCount} parsed · {indexedCount} indexed · {factCount} facts
-            </dd>
-          </div>
-          <div>
-            <dt>Consent mode</dt>
-            <dd>Pilot auto-allow</dd>
-          </div>
-        </dl>
 
-        {documentCount > 0 && onSearchDocuments ? (
-          <button className="chat-button secondary" type="button" disabled={isBusy} onClick={onSearchDocuments}>
-            Search documents
-          </button>
-        ) : null}
-
-        <div className="thread-picker">
-          <p className="thread-picker-label">Switch thread</p>
-          {loadingThreads && <p className="thread-picker-loading">Loading threads...</p>}
-          {!loadingThreads && threads.length === 0 && (
-            <p className="thread-picker-empty">No threads found.</p>
-          )}
-          {!loadingThreads && threads.length > 0 && (
-            <ul className="thread-list">
-              {threads.map((thread) => {
-                const isActive = thread.thread_id === threadId;
-                return (
-                  <li key={thread.thread_id} className={`thread-item${isActive ? " active" : ""}${thread.archived ? " archived" : ""}`}>
-                    <button
-                      className="thread-item-button"
-                      type="button"
-                      disabled={isActive || isBusy}
-                      onClick={() => onSwitchThread(thread.thread_id)}
-                    >
-                      <span className="thread-item-id">{thread.thread_id.slice(0, 8)}</span>
-                      <span className="thread-item-meta">
-                        {thread.itr_type} · {thread.submission_status}
-                        {thread.document_count > 0 ? ` · ${thread.document_count} doc${thread.document_count !== 1 ? "s" : ""}` : ""}
-                        {thread.archived ? " · archived" : ""}
-                      </span>
-                      {isActive && <span className="thread-item-active-badge">active</span>}
-                    </button>
-                  </li>
-                );
-              })}
+        <div className="settings-scroll">
+          <section className="settings-section">
+            <h3>Status</h3>
+            <ul className="settings-status-list">
+              <li>
+                <span>Portal trust</span>
+                <strong>{trustMessage ?? "Unknown"}</strong>
+              </li>
+              <li>
+                <span>Consent mode</span>
+                <strong>Pilot auto-allow</strong>
+              </li>
             </ul>
-          )}
+          </section>
+
+          <section className="settings-section">
+            <div className="settings-section-head">
+              <h3>Documents</h3>
+              {onSearchDocuments && documentCount > 0 ? (
+                <button
+                  className="settings-link-button"
+                  type="button"
+                  disabled={isBusy}
+                  onClick={onSearchDocuments}
+                >
+                  Search
+                </button>
+              ) : null}
+            </div>
+            {documentCount === 0 ? (
+              <p className="settings-empty">
+                No documents yet. Upload Form 16, AIS, TIS, or proofs from the chat.
+              </p>
+            ) : (
+              <div className="settings-metric-grid">
+                <div className="settings-metric">
+                  <span>Uploaded</span>
+                  <strong>{documentCount}</strong>
+                </div>
+                <div className="settings-metric">
+                  <span>Parsed</span>
+                  <strong>{parsedCount}</strong>
+                </div>
+                <div className="settings-metric">
+                  <span>Indexed</span>
+                  <strong>{indexedCount}</strong>
+                </div>
+                <div className="settings-metric">
+                  <span>Facts</span>
+                  <strong>{factCount}</strong>
+                </div>
+              </div>
+            )}
+          </section>
+
+          <section className="settings-section">
+            <div className="settings-section-head">
+              <h3>Regime</h3>
+              {onCompareRegimes ? (
+                <button
+                  className="settings-link-button"
+                  type="button"
+                  disabled={isBusy}
+                  onClick={onCompareRegimes}
+                >
+                  {regimePreview ? "Refresh" : "Compare"}
+                </button>
+              ) : null}
+            </div>
+            {regimePreview ? (
+              <div className="settings-regime">
+                <p className="settings-regime-recommend">
+                  Recommended: <strong>{regimePreview.recommended_regime}</strong>
+                </p>
+                {regimePreview.rationale[0] ? (
+                  <p className="settings-regime-rationale">{regimePreview.rationale[0]}</p>
+                ) : null}
+                <div className="settings-metric-grid">
+                  <div className="settings-metric">
+                    <span>Old regime tax</span>
+                    <strong>{formatInr(regimePreview.old_regime.net_tax_liability)}</strong>
+                  </div>
+                  <div className="settings-metric">
+                    <span>New regime tax</span>
+                    <strong>{formatInr(regimePreview.new_regime.net_tax_liability)}</strong>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <p className="settings-empty">Compare old vs new regime once facts are extracted.</p>
+            )}
+          </section>
+
+          {supportBlocked ? (
+            <section className="settings-section settings-section-alert">
+              <h3>Review needed</h3>
+              <p className="settings-alert-title">
+                {supportAssessment?.reasons[0]?.title ?? "The filing thread has a support blocker."}
+              </p>
+              <ul className="settings-status-list">
+                <li>
+                  <span>Mode</span>
+                  <strong>{supportAssessment?.mode}</strong>
+                </li>
+                <li>
+                  <span>Blockers</span>
+                  <strong>{supportAssessment?.blocking_issues.length ?? 0}</strong>
+                </li>
+              </ul>
+            </section>
+          ) : null}
+
+          <section className="settings-section">
+            <h3>Threads</h3>
+            {loadingThreads && <p className="settings-empty">Loading threads…</p>}
+            {!loadingThreads && threads.length === 0 && (
+              <p className="settings-empty">No threads found.</p>
+            )}
+            {!loadingThreads && threads.length > 0 && (
+              <ul className="thread-list">
+                {threads.map((thread) => {
+                  const isActive = thread.thread_id === threadId;
+                  return (
+                    <li
+                      key={thread.thread_id}
+                      className={`thread-item${isActive ? " active" : ""}${thread.archived ? " archived" : ""}`}
+                    >
+                      <button
+                        className="thread-item-button"
+                        type="button"
+                        disabled={isActive || isBusy}
+                        onClick={() => onSwitchThread(thread.thread_id)}
+                      >
+                        <span className="thread-item-id">{thread.thread_id.slice(0, 8)}</span>
+                        <span className="thread-item-meta">
+                          {thread.itr_type} · {thread.submission_status}
+                          {thread.document_count > 0
+                            ? ` · ${thread.document_count} doc${thread.document_count !== 1 ? "s" : ""}`
+                            : ""}
+                          {thread.archived ? " · archived" : ""}
+                        </span>
+                        {isActive && <span className="thread-item-active-badge">active</span>}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
         </div>
 
-        <button className="chat-button secondary" type="button" disabled={isBusy} onClick={onNewConversation}>
-          New conversation
-        </button>
-        <button className="chat-button danger" type="button" disabled={isBusy} onClick={onSignOut}>
-          Sign out
-        </button>
+        <footer className="settings-footer">
+          <button
+            className="chat-button secondary"
+            type="button"
+            disabled={isBusy}
+            onClick={onNewConversation}
+          >
+            New conversation
+          </button>
+          <button className="chat-button danger" type="button" disabled={isBusy} onClick={onSignOut}>
+            Sign out
+          </button>
+        </footer>
       </section>
     </aside>
   );

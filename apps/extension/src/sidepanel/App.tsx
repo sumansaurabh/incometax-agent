@@ -392,34 +392,8 @@ export default function App(): JSX.Element {
       });
     });
 
-    if (supportAssessment && (!supportAssessment.can_autofill || !supportAssessment.can_submit)) {
-      cards.push({
-        id: "support-assessment",
-        kind: "error",
-        title: "Review needed",
-        body: supportAssessment.reasons[0]?.title ?? "The filing thread has a support blocker.",
-        meta: [
-          { label: "Mode", value: supportAssessment.mode },
-          { label: "Blockers", value: String(supportAssessment.blocking_issues.length) },
-        ],
-      });
-    }
-
-    if (regimePreview) {
-      cards.push({
-        id: "regime-preview",
-        kind: "summary",
-        title: `Recommended regime: ${regimePreview.recommended_regime}`,
-        body: regimePreview.rationale[0] ?? "Regime comparison has been calculated from available facts.",
-        meta: [
-          { label: "Old regime tax", value: `INR ${Math.round(regimePreview.old_regime.net_tax_liability).toLocaleString("en-IN")}` },
-          { label: "New regime tax", value: `INR ${Math.round(regimePreview.new_regime.net_tax_liability).toLocaleString("en-IN")}` },
-        ],
-      });
-    }
-
     return cards;
-  }, [approvals, fillPlan, regimePreview, supportAssessment]);
+  }, [approvals, fillPlan]);
 
   const handleLogin = async () => {
     const email = authEmail.trim();
@@ -785,9 +759,15 @@ export default function App(): JSX.Element {
         parsedCount={parsedCount}
         indexedCount={indexedCount}
         factCount={factCount}
+        supportAssessment={supportAssessment}
+        regimePreview={regimePreview}
         onSearchDocuments={() => {
           setSettingsOpen(false);
           void handleSearchDocuments();
+        }}
+        onCompareRegimes={() => {
+          setSettingsOpen(false);
+          void handleCompareRegimes();
         }}
         isBusy={isBusy}
         onClose={() => setSettingsOpen(false)}
