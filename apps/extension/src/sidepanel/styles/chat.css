@@ -207,7 +207,7 @@
 
 /* Bubble */
 .chat-bubble {
-  max-width: min(88%, 440px);
+  max-width: 92%;
   min-width: 0;
   padding: 10px 13px;
   border: 1px solid transparent;
@@ -221,6 +221,7 @@
 .chat-row.agent .chat-bubble {
   border-color: var(--color-border);
   border-top-left-radius: 4px;
+  max-width: 96%;
 }
 
 .chat-row.user .chat-bubble {
@@ -228,6 +229,7 @@
   color: #fff;
   border-top-right-radius: 4px;
   box-shadow: 0 1px 2px color-mix(in srgb, var(--color-primary) 35%, transparent);
+  max-width: min(88%, 520px);
 }
 
 .chat-row.system .chat-bubble {
@@ -247,20 +249,44 @@
 }
 
 .chat-bubble p,
-.chat-bubble ul {
+.chat-bubble ul,
+.chat-bubble ol {
   margin: 0;
   font-size: 13.5px;
   line-height: 1.5;
 }
 
-.chat-bubble p + p,
-.chat-bubble p + ul,
-.chat-bubble ul + p {
+.chat-bubble > * + * {
   margin-top: 8px;
 }
 
-.chat-bubble ul {
-  padding-left: 18px;
+.chat-bubble ul,
+.chat-bubble ol {
+  padding-left: 20px;
+}
+
+.chat-bubble li + li {
+  margin-top: 2px;
+}
+
+.chat-bubble a {
+  color: var(--color-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  overflow-wrap: anywhere;
+}
+
+.chat-row.user .chat-bubble a {
+  color: #fff;
+  text-decoration-color: rgba(255, 255, 255, 0.75);
+}
+
+.chat-bubble .markdown-heading {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 700;
+  line-height: 1.35;
+  letter-spacing: -0.005em;
 }
 
 .chat-bubble code {
@@ -269,6 +295,38 @@
   background: color-mix(in srgb, currentColor 10%, transparent);
   font-size: 12px;
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
+}
+
+.chat-bubble .markdown-table-wrap {
+  overflow-x: auto;
+  border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, currentColor 4%, transparent);
+}
+
+.chat-bubble .markdown-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.chat-bubble .markdown-table th,
+.chat-bubble .markdown-table td {
+  padding: 6px 10px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+  overflow-wrap: anywhere;
+}
+
+.chat-bubble .markdown-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.chat-bubble .markdown-table th {
+  font-weight: 600;
+  background: color-mix(in srgb, currentColor 8%, transparent);
 }
 
 .message-footer {

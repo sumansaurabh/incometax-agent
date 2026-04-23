@@ -1,4 +1,6 @@
 import React, { useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 import { ChatMessage } from "./chat-types";
 import { DiffCard, ProposalCard } from "./DiffCard";
@@ -37,53 +39,37 @@ function formatRelativeTime(iso: string): string {
   return new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short" }).format(new Date(iso));
 }
 
-function renderInlineMarkdown(text: string): React.ReactNode[] {
-  const nodes: React.ReactNode[] = [];
-  const pattern = /(\*\*[^*]+\*\*)/g;
-  text.split(pattern).forEach((part, index) => {
-    if (!part) return;
-    if (part.startsWith("**") && part.endsWith("**")) {
-      nodes.push(<strong key={`${part}-${index}`}>{part.slice(2, -2)}</strong>);
-    } else {
-      nodes.push(part);
-    }
-  });
-  return nodes;
+const SAFE_URL_SCHEMES = /^(https?:|mailto:|tel:)/i;
+
+function safeUrl(url: string): string {
+  const trimmed = url.trim();
+  if (trimmed.startsWith("/") || trimmed.startsWith("#") || trimmed.startsWith(".")) {
+    return trimmed;
+  }
+  return SAFE_URL_SCHEMES.test(trimmed) ? trimmed : "";
 }
 
-function MarkdownLite({ content }: { content: string }): JSX.Element {
-  const lines = content.split("\n");
-  const blocks: JSX.Element[] = [];
-  let listItems: string[] = [];
-
-  const flushList = () => {
-    if (!listItems.length) return;
-    blocks.push(
-      <ul key={`list-${blocks.length}`}>
-        {listItems.map((item, index) => (
-          <li key={`${item}-${index}`}>{renderInlineMarkdown(item)}</li>
-        ))}
-      </ul>
-    );
-    listItems = [];
-  };
-
-  lines.forEach((line) => {
-    const trimmed = line.trim();
-    if (!trimmed) {
-      flushList();
-      return;
-    }
-    if (trimmed.startsWith("- ")) {
-      listItems.push(trimmed.slice(2));
-      return;
-    }
-    flushList();
-    blocks.push(<p key={`p-${blocks.length}`}>{renderInlineMarkdown(trimmed)}</p>);
-  });
-  flushList();
-
-  return <>{blocks}</>;
+function MessageMarkdown({ content }: { content: string }): JSX.Element {
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      urlTransform={safeUrl}
+      components={{
+        a: ({ children, href, ...rest }) => (
+          <a href={href} target="_blank" rel="noopener noreferrer" {...rest}>
+            {children}
+          </a>
+        ),
+        table: ({ children }) => (
+          <div className="markdown-table-wrap">
+            <table className="markdown-table">{children}</table>
+          </div>
+        ),
+      }}
+    >
+      {content}
+    </ReactMarkdown>
+  );
 }
 
 export function ChatBubble({ message, onCardAction, onProposalDecision, onSubmitPassword }: Props): JSX.Element {
@@ -95,7 +81,7 @@ export function ChatBubble({ message, onCardAction, onProposalDecision, onSubmit
   return (
     <div className={`chat-row ${message.role}`}>
       <div className="chat-bubble">
-        {message.content ? <MarkdownLite content={message.content} /> : null}
+        {message.content ? <MessageMarkdown content={message.content} /> : null}
         {message.cards?.map((card) => (
           <MessageCard
             key={card.id}
